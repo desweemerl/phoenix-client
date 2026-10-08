@@ -1,8 +1,9 @@
-use Mix.Config
+import Config
 
 config :phoenix, :json_library, Jason
 
 config :phoenix_client_test, PhoenixClientTestWeb.Endpoint,
+  adapter: Bandit.PhoenixAdapter,
   http: [
     port: 4000,
     otp_app: :phoenix_client_test,

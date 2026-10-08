@@ -148,7 +148,7 @@ private class ClientImpl(
                         }
                     }
 
-                    val joinRef = if (isJoinEvent) null else channel?.joinRef
+                    val joinRef = if (isJoinEvent) ref else channel?.joinRef
                     val outgoingMessage = OutgoingMessage(topic, event, payload, ref, joinRef)
 
                     if (noReply) {
