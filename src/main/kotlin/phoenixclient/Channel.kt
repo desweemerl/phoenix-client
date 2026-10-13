@@ -95,17 +95,21 @@ internal class ChannelImpl(
         if (state.value == ChannelState.LEAVING
             || state.value == ChannelState.CLOSE
         ) {
+            _joinRef = null
             return
         }
 
+        val wasJoined = state.value == ChannelState.JOINED
         _state.update { ChannelState.LEAVING }
-        _joinRef = null
 
-        push("phx_leave", emptyPayload, timeout)
-            .getOrNull()?.let {
-                // Don't care about the result.
-                _state.update { ChannelState.CLOSE }
-            }
+        // Send phx_leave before clearing the join ref: the server drops it without the current join_ref.
+        if (wasJoined) {
+            // Don't care about the result.
+            sendToSocket("phx_leave", emptyPayload, timeout.toDynamicTimeout(), false)
+        }
+
+        _joinRef = null
+        _state.update { ChannelState.CLOSE }
     }
 
     internal suspend fun rejoin(timeout: DynamicTimeout = DEFAULT_REJOIN_TIMEOUT): Result<Channel> =
@@ -137,10 +141,14 @@ internal class ChannelImpl(
                 sendToSocket("phx_join", payload, timeout, false).map { it!! }
                     .onSuccess {
                         logger.debug("Channel with topic '$topic' was joined")
-                        _state.update { ChannelState.JOINED }
+                        // Set the join ref before publishing JOINED: pushes waiting on that state
+                        // read it right away, and the server drops messages with a stale join_ref.
                         _joinRef = it.ref
+                        _state.update { ChannelState.JOINED }
                     }
                     .onFailure {
+                        // Back to CLOSE so that the channel can be joined again.
+                        _state.update { ChannelState.CLOSE }
                         logger.error("Failed to join channel with '$topic': " + it.stackTraceToString())
                     }
                     .map { this }

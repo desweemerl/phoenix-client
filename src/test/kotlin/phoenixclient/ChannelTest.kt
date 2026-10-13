@@ -217,6 +217,99 @@ class ChannelTest {
         }
     }
 
+    @Test
+    @ExperimentalCoroutinesApi
+    fun testChannelLeave() = runTest {
+        withContext(Dispatchers.Default) {
+            withTimeout(5000) {
+                val client = getClient()
+                client.connect(mapOf("token" to "user1234"))
+                val channel = client.join("test:1").getOrThrow()
+
+                // Subscribe before leaving so that the reply to phx_leave cannot be missed.
+                val leaveReply = async(start = CoroutineStart.UNDISPATCHED) {
+                    client.messages
+                        .filter { it.topic == "test:1" && it.event == "phx_reply" }
+                        .first()
+                }
+
+                channel.leave()
+
+                // The server only replies when phx_leave was sent with the current join_ref.
+                assert(leaveReply.await().hasStatus("ok"))
+                assert(channel.state.first() == ChannelState.CLOSE)
+
+                // The topic can be joined again after leaving.
+                val rejoined = client.join("test:1").getOrThrow()
+                assert(rejoined.push("hello", TestPayload(name = "toto")).isSuccess)
+
+                client.disconnect()
+            }
+        }
+    }
+
+    @Test
+    @ExperimentalCoroutinesApi
+    fun testDisconnectWithMultipleChannels() = runTest {
+        withContext(Dispatchers.Default) {
+            withTimeout(5000) {
+                val client = getClient()
+                client.connect(mapOf("token" to "user1234"))
+                val channels = listOf("test:1", "test:2", "test:3").map { client.join(it).getOrThrow() }
+
+                client.disconnect()
+
+                channels.forEach { assert(it.state.first() == ChannelState.CLOSE) }
+            }
+        }
+    }
+
+    @Test
+    @ExperimentalCoroutinesApi
+    fun testChannelJoinRefused() = runTest {
+        withContext(Dispatchers.Default) {
+            withTimeout(5000) {
+                val client = getClient()
+                client.connect(mapOf("token" to "user1234"))
+
+                // A refused join must not leave the channel stuck in JOINING: joining again
+                // gets the server's refusal again, not "already joining".
+                repeat(2) {
+                    val exception = client.join("test:refused").exceptionOrNull()
+                    assert(exception is ResponseException) { "attempt $it: $exception" }
+                }
+
+                client.disconnect()
+            }
+        }
+    }
+
+    @RepeatedTest(5)
+    @ExperimentalCoroutinesApi
+    fun testChannelConcurrentPushes() = runTest {
+        withContext(Dispatchers.Default) {
+            withTimeout(10000) {
+                val client = getClient()
+                client.connect(mapOf("token" to "user1234"))
+                val channel = client.join("test:1").getOrThrow()
+
+                // Each push must get its own reply, even when many are in flight at once.
+                val replies = (1..500).map { i ->
+                    async {
+                        i to channel.push("hello", TestPayload(name = "toto$i"), 2000L)
+                    }
+                }.awaitAll()
+
+                client.disconnect()
+
+                replies.forEach { (i, reply) ->
+                    val message = reply.getOrThrow().convertTo(ReplyMessage::class).getOrThrow().message
+                    assert(message == "hello toto$i") { "push $i got '$message'" }
+                }
+            }
+        }
+    }
+
     private fun getClient(
         retry: DynamicTimeout = DEFAULT_RETRY,
         heartbeatInterval: Long = DEFAULT_HEARTBEAT_INTERVAL

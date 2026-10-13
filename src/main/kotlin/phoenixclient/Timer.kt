@@ -2,6 +2,7 @@ package phoenixclient
 
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeout
 
 typealias DynamicTimeout = (tries: Int) -> Long?
@@ -28,6 +29,8 @@ suspend fun dynamicTimer(dynamicTimeout: DynamicTimeout, block: suspend () -> Un
                 active = false
             }
         } catch (_: TimeoutCancellationException) {
+            // Only our own timeout is retried: rethrow if the caller's coroutine was cancelled.
+            ensureActive()
         }
 
         attempt++

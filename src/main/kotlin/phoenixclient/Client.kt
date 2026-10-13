@@ -1,9 +1,11 @@
 package phoenixclient
 
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel.Factory.UNLIMITED
 import kotlinx.coroutines.flow.*
 import mu.KotlinLogging
 import phoenixclient.engine.*
+import java.util.concurrent.atomic.AtomicLong
 
 
 enum class ConnectionState {
@@ -40,19 +42,15 @@ interface Client {
 }
 
 fun refGenerator(): () -> Long {
-    var ref = 0L
+    // Atomic since messages are sent concurrently from several threads.
+    val ref = AtomicLong(0L)
 
     return {
-        ref = if (ref == Long.MAX_VALUE) {
-            0
-        } else {
-            ++ref
-        }
-        ref
+        ref.updateAndGet { if (it == Long.MAX_VALUE) 0 else it + 1 }
     }
 }
 
-private class ClientImpl(
+internal class ClientImpl(
     val host: String = DEFAULT_WS_HOST,
     val port: Int = DEFAULT_WS_PORT,
     val path: String = DEFAULT_WS_PATH,
@@ -79,11 +77,13 @@ private class ClientImpl(
     override val active: Boolean
         get() = _state.value.active
 
-    // Incoming messages
-    private val _messages = MutableSharedFlow<IncomingMessage>(extraBufferCapacity = 100)
+    // Incoming messages. Buffers are unbounded so that a slow subscriber never causes messages to be dropped:
+    // they are emitted from the WebSocket reader thread, which must not block (a subscriber may be waiting
+    // for a reply that this thread has yet to read).
+    private val _messages = MutableSharedFlow<IncomingMessage>(extraBufferCapacity = UNLIMITED)
 
-    // Shared flow with replay of 1 to avoid loss of messages (collecting flow after receiving the message)
-    private val refMessages = MutableSharedFlow<IncomingMessage>(replay = 1, extraBufferCapacity = 100)
+    // Incoming messages for matching replies to requests. send() subscribes before sending, so no replay is needed.
+    private val refMessages = MutableSharedFlow<IncomingMessage>(extraBufferCapacity = UNLIMITED)
     override val messages = _messages.asSharedFlow()
 
     private var webSocketJob: Job? = null
@@ -105,6 +105,7 @@ private class ClientImpl(
     ): Result<IncomingMessage?> {
         val channel = channels[topic]
         val isJoinEvent = event == "phx_join"
+        val isLeaveEvent = event == "phx_leave"
 
         // No need to join a channel with the topic "phoenix" (heartbeat).
         if (
@@ -138,7 +139,7 @@ private class ClientImpl(
                                 )
                                 return@withTimeout
                             }
-                        } else {
+                        } else if (!isLeaveEvent) {
                             logger.debug(
                                 "Waiting for channel with topic '${channel.topic}' to join before sending "
                                         + "message with event='$event' and payload='$payload'"
@@ -157,9 +158,15 @@ private class ClientImpl(
                         return@withTimeout
                     }
 
+                    // Send once subscribed, so that a reply arriving right away is not missed.
+                    val replies = refMessages
+                        .onSubscription { webSocketEngine.send(outgoingMessage) }
+                        .filter { it.ref == ref }
+                        .map { Result.success(it) }
+
                     val flows = arrayOf(
-                        refMessages.filter { it.ref == ref }.map { Result.success(it) },
-                        if (topic != "phoenix" && !isJoinEvent && channel != null) {
+                        replies,
+                        if (topic != "phoenix" && !isJoinEvent && !isLeaveEvent && channel != null) {
                             channel.state.filter { it != ChannelState.JOINED }.map {
                                 Result.failure(ChannelException("Channel with topic '$topic' was closed"))
                             }
@@ -169,7 +176,6 @@ private class ClientImpl(
                     )
 
                     val flow = merge(*flows.filterNotNull().toTypedArray())
-                    webSocketEngine.send(outgoingMessage)
                     result = flow.first()
 
                     result?.getOrNull()?.let {
@@ -179,6 +185,8 @@ private class ClientImpl(
                     }
                 }
             } catch (ex: TimeoutCancellationException) {
+                // Only our own timeout is retried: rethrow if the caller's coroutine was cancelled.
+                currentCoroutineContext().ensureActive()
                 result = Result.failure(TimeoutException("request with ref '$ref' timed out"))
             } catch (ex: Exception) {
                 result = Result.failure(ex)
@@ -416,7 +424,10 @@ private class ClientImpl(
 
         _state.update { ClientState(active = false, connectionState = it.connectionState) }
 
-        channels.values.forEach { it.leave() }
+        // Iterate over a copy: leave() removes the channel from the map.
+        coroutineScope {
+            channels.values.toList().forEach { launch { it.leave() } }
+        }
         channels.clear()
 
         webSocketEngine.close()
