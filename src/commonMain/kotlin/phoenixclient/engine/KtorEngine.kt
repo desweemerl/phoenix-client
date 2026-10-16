@@ -41,12 +41,12 @@ class KtorEngine(
 ) : WebSocketEngine {
     private val logger = Logger.withTag("PhoenixClient.KtorEngine")
 
-    // Reads incoming frames independently of the connect() caller, like the OkHttp listener thread.
+    // Reads and writes frames independently of the connect() caller, which returns once connected.
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     private var defaultClient: PlatformHttpClient? = null
 
-    // Frames are queued and written by a single coroutine, so that send() returns right away like OkHttp's.
+    // Frames are queued and written by a single coroutine, so that send() returns right away.
     // Awaiting the session's send instead delays the caller until the frame is acknowledged by the platform,
     // which on Darwin lags far behind the network under a burst of messages.
     private class Connection(

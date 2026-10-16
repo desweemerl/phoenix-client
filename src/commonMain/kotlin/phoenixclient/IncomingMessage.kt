@@ -70,7 +70,6 @@ fun fromJson(input: String): IncomingMessage {
 }
 
 val Forbidden = IncomingMessage(topic = "phoenix", event = "forbidden")
-val SocketClose = IncomingMessage(topic = "phoenix", event = "socket_close")
 val Failure = IncomingMessage(topic = "phoenix", event = "failure")
 
 @Serializable

@@ -18,24 +18,12 @@ fun runRepeatedTest(times: Int, body: suspend TestScope.() -> Unit): TestResult 
         repeat(times) { body() }
     }
 
-// Integration tests run against every engine: subclasses provide the engine.
+// Base of the integration tests, which run against the Phoenix test server.
 abstract class EngineTest {
-    abstract fun createEngine(): WebSocketEngine
+    fun createEngine(): WebSocketEngine = KtorEngine()
 
     init {
         // Print logs in the test reports on every platform (Kermit writes to OSLog on iOS).
         Logger.setLogWriters(CommonWriter())
     }
-}
-
-class KtorClientTest : ClientTest() {
-    override fun createEngine(): WebSocketEngine = KtorEngine()
-}
-
-class KtorChannelTest : ChannelTest() {
-    override fun createEngine(): WebSocketEngine = KtorEngine()
-}
-
-class KtorDeserializationTest : DeserializationTest() {
-    override fun createEngine(): WebSocketEngine = KtorEngine()
 }

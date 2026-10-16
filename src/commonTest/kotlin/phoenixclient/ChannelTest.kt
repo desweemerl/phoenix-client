@@ -9,7 +9,7 @@ import kotlin.test.*
 @Serializable
 class ReplyMessage(val message: String)
 
-abstract class ChannelTest : EngineTest() {
+class ChannelTest : EngineTest() {
 
     @Test
     @ExperimentalCoroutinesApi

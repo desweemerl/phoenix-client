@@ -9,7 +9,7 @@ import phoenixclient.engine.DEFAULT_WS_PATH
 import kotlin.test.*
 
 
-abstract class ClientTest : EngineTest() {
+class ClientTest : EngineTest() {
 
     @Test
     @ExperimentalCoroutinesApi

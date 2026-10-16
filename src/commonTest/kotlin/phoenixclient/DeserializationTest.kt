@@ -8,7 +8,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import kotlin.test.*
 
-abstract class DeserializationTest : EngineTest() {
+class DeserializationTest : EngineTest() {
 
     @Serializable
     data class TestReplyObject(
