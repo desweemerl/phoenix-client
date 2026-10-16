@@ -2,6 +2,8 @@ package phoenixclient
 
 import co.touchlab.kermit.Logger
 import kotlinx.atomicfu.atomic
+import kotlinx.atomicfu.locks.SynchronizedObject
+import kotlinx.atomicfu.locks.synchronized
 import kotlinx.atomicfu.updateAndGet
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel.Factory.UNLIMITED
@@ -91,9 +93,28 @@ internal class ClientImpl(
     // for a reply that this thread has yet to read).
     private val _messages = MutableSharedFlow<IncomingMessage>(extraBufferCapacity = UNLIMITED)
 
-    // Incoming messages for matching replies to requests. send() subscribes before sending, so no replay is needed.
-    private val refMessages = MutableSharedFlow<IncomingMessage>(extraBufferCapacity = UNLIMITED)
     override val messages = _messages.asSharedFlow()
+
+    // Requests waiting for their reply, by ref. send() registers before sending, so that a reply arriving right
+    // away is not missed. Looking replies up by ref keeps the cost per reply constant, whatever the number of
+    // requests in flight. The lock is not suspending: replies are dispatched from the WebSocket reader callback.
+    private val pendingRepliesLock = SynchronizedObject()
+    private val pendingReplies = mutableMapOf<String, CompletableDeferred<IncomingMessage>>()
+
+    private fun registerReply(ref: String): CompletableDeferred<IncomingMessage> =
+        CompletableDeferred<IncomingMessage>().also { reply ->
+            synchronized(pendingRepliesLock) { pendingReplies[ref] = reply }
+        }
+
+    private fun unregisterReply(ref: String) {
+        synchronized(pendingRepliesLock) { pendingReplies.remove(ref) }
+    }
+
+    private fun dispatchReply(message: IncomingMessage) {
+        val ref = message.ref ?: return
+        val reply = synchronized(pendingRepliesLock) { pendingReplies.remove(ref) }
+        reply?.complete(message)
+    }
 
     private var webSocketJob: Job? = null
 
@@ -167,25 +188,28 @@ internal class ClientImpl(
                         return@withTimeout
                     }
 
-                    // Send once subscribed, so that a reply arriving right away is not missed.
-                    val replies = refMessages
-                        .onSubscription { webSocketEngine.send(outgoingMessage) }
-                        .filter { it.ref == ref }
-                        .map { Result.success(it) }
+                    val reply = registerReply(ref)
 
-                    val flows = arrayOf(
-                        replies,
-                        if (topic != "phoenix" && !isJoinEvent && !isLeaveEvent && channel != null) {
-                            channel.state.filter { it != ChannelState.JOINED }.map {
-                                Result.failure(ChannelException("Channel with topic '$topic' was closed"))
+                    try {
+                        webSocketEngine.send(outgoingMessage)
+
+                        val flows = arrayOf(
+                            flow<Result<IncomingMessage>> { emit(Result.success(reply.await())) },
+                            if (topic != "phoenix" && !isJoinEvent && !isLeaveEvent && channel != null) {
+                                channel.state.filter { it != ChannelState.JOINED }.map {
+                                    Result.failure<IncomingMessage>(ChannelException("Channel with topic '$topic' was closed"))
+                                }
+                            } else {
+                                null
                             }
-                        } else {
-                            null
-                        }
-                    )
+                        )
 
-                    val flow = merge(*flows.filterNotNull().toTypedArray())
-                    result = flow.first()
+                        val flow = merge(*flows.filterNotNull().toTypedArray())
+                        result = flow.first()
+                    } finally {
+                        // Also on timeout or failure: a late reply is then ignored.
+                        unregisterReply(ref)
+                    }
 
                     result?.getOrNull()?.let {
                         if (it.isError() || it.hasStatus("error")) {
@@ -306,9 +330,7 @@ internal class ClientImpl(
                     logger.w { "Failed to emit message: $incomingMessage" }
                 }
 
-                if (!refMessages.tryEmit(incomingMessage)) {
-                    logger.w { "Failed to emit message for internal processing: $incomingMessage" }
-                }
+                dispatchReply(incomingMessage)
 
                 // TODO: Check forbidden on both WebSocket and channel
                 if (incomingMessage == Forbidden) {
