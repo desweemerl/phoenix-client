@@ -136,36 +136,36 @@ internal class ChannelImpl(
     internal suspend fun join(
         payload: JsonElement = emptyPayload,
         timeout: DynamicTimeout = DEFAULT_REJOIN_TIMEOUT,
-    ): Result<Channel> =
-        when (state.value) {
-            ChannelState.LEAVING
-            -> Result.failure(BadActionException("Channel with topic '$topic' is leaving"))
-
-            ChannelState.JOINING
-            -> Result.failure(BadActionException("Channel with topic '$topic' is already joining"))
-
-            ChannelState.JOINED
-            -> Result.failure(BadActionException("Channel with topic '$topic' is already joined"))
-
-            else -> {
-                _state.update { ChannelState.JOINING }
-
-                joinPayload = payload
-
-                sendToSocket("phx_join", payload, timeout, false).map { it!! }
-                    .onSuccess {
-                        logger.d { "Channel with topic '$topic' was joined" }
-                        // Set the join ref before publishing JOINED: pushes waiting on that state
-                        // read it right away, and the server drops messages with a stale join_ref.
-                        _joinRef = it.ref
-                        _state.update { ChannelState.JOINED }
+    ): Result<Channel> {
+        // Atomic transition: concurrent joins must send a single phx_join. Otherwise the server closes the first
+        // session, and the channel may keep its join ref: its pushes and phx_leave are then dropped.
+        if (!_state.compareAndSet(ChannelState.CLOSE, ChannelState.JOINING)) {
+            return Result.failure(
+                BadActionException(
+                    when (state.value) {
+                        ChannelState.LEAVING -> "Channel with topic '$topic' is leaving"
+                        ChannelState.JOINED -> "Channel with topic '$topic' is already joined"
+                        else -> "Channel with topic '$topic' is already joining"
                     }
-                    .onFailure {
-                        // Back to CLOSE so that the channel can be joined again.
-                        _state.update { ChannelState.CLOSE }
-                        logger.e { "Failed to join channel with '$topic': " + it.stackTraceToString() }
-                    }
-                    .map { this }
-            }
+                )
+            )
         }
+
+        joinPayload = payload
+
+        return sendToSocket("phx_join", payload, timeout, false).map { it!! }
+            .onSuccess {
+                logger.d { "Channel with topic '$topic' was joined" }
+                // Set the join ref before publishing JOINED: pushes waiting on that state
+                // read it right away, and the server drops messages with a stale join_ref.
+                _joinRef = it.ref
+                _state.update { ChannelState.JOINED }
+            }
+            .onFailure {
+                // Back to CLOSE so that the channel can be joined again.
+                _state.update { ChannelState.CLOSE }
+                logger.e { "Failed to join channel with '$topic': " + it.stackTraceToString() }
+            }
+            .map { this }
+    }
 }

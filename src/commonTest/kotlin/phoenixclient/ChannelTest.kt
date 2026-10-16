@@ -309,6 +309,35 @@ class ChannelTest : EngineTest() {
         }
     }
 
+    @Test
+    @ExperimentalCoroutinesApi
+    fun testConcurrentJoins() = runRepeatedTest(5) {
+        withContext(Dispatchers.Default) {
+            withTimeout(10000) {
+                val client = getClient()
+                client.connect(mapOf("token" to "user1234"))
+                client.state.waitConnected()
+
+                // Many topics joined at once: every channel is stored and usable.
+                val channels = (1..50).map { i ->
+                    async { client.join("test:$i").getOrThrow() }
+                }.awaitAll()
+
+                channels.map { async { it.push("hello", TestPayload(name = "toto")) } }
+                    .awaitAll()
+                    .forEachIndexed { i, reply -> assertTrue(reply.isSuccess, "push on test:${i + 1}: $reply") }
+
+                // The same topic joined at once: a single channel. The other joins may fail with "already joining".
+                val sameTopic = (1..20).map { async { client.join("test:same") } }.awaitAll()
+                assertEquals(1, sameTopic.mapNotNull { it.getOrNull() }.distinct().size)
+
+                client.disconnect()
+
+                channels.forEach { assertEquals(ChannelState.CLOSE, it.state.first()) }
+            }
+        }
+    }
+
     private fun getClient(
         retry: DynamicTimeout = DEFAULT_RETRY,
         heartbeatInterval: Long = DEFAULT_HEARTBEAT_INTERVAL

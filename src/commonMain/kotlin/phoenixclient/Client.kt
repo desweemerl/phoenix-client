@@ -80,8 +80,23 @@ internal class ClientImpl(
     // Manage message ref
     private val messageRef = refGenerator()
 
-    // Channels storage
+    // Channels storage, accessed from several threads (joins, reconnection, WebSocket callbacks).
+    // The lock is held for map operations only, never across a suspension: iterate over a snapshot.
+    private val channelsLock = SynchronizedObject()
     private val channels = mutableMapOf<String, ChannelImpl>()
+
+    private fun channel(topic: String): ChannelImpl? = synchronized(channelsLock) { channels[topic] }
+
+    private fun channelsSnapshot(): List<ChannelImpl> = synchronized(channelsLock) { channels.values.toList() }
+
+    // Only removes the given channel: the topic may have been joined again meanwhile.
+    private fun removeChannel(topic: String, channel: ChannelImpl) {
+        synchronized(channelsLock) {
+            if (channels[topic] === channel) {
+                channels.remove(topic)
+            }
+        }
+    }
 
     private val _state = MutableStateFlow(ClientState())
     override val state = _state.asStateFlow()
@@ -133,7 +148,7 @@ internal class ClientImpl(
         timeout: DynamicTimeout,
         noReply: Boolean = false,
     ): Result<IncomingMessage?> {
-        val channel = channels[topic]
+        val channel = channel(topic)
         val isJoinEvent = event == "phx_join"
         val isLeaveEvent = event == "phx_leave"
 
@@ -196,7 +211,12 @@ internal class ClientImpl(
                         val flows = arrayOf(
                             flow<Result<IncomingMessage>> { emit(Result.success(reply.await())) },
                             if (topic != "phoenix" && !isJoinEvent && !isLeaveEvent && channel != null) {
-                                channel.state.filter { it != ChannelState.JOINED }.map {
+                                // The server drops the request if the channel crashed. Compare the join ref too:
+                                // the state is a StateFlow, which may skip CLOSE/JOINING when the channel is
+                                // rejoined before this subscription.
+                                channel.state.filter {
+                                    it != ChannelState.JOINED || channel.joinRef != joinRef
+                                }.map {
                                     Result.failure<IncomingMessage>(ChannelException("Channel with topic '$topic' was closed"))
                                 }
                             } else {
@@ -236,11 +256,11 @@ internal class ClientImpl(
     }
 
     private fun dirtyCloseChannels() {
-        channels.values.forEach { it.dirtyClose() }
+        channelsSnapshot().forEach { it.dirtyClose() }
     }
 
     private suspend fun rejoinChannel(topic: String) = coroutineScope {
-        channels[topic]?.let {
+        channel(topic)?.let {
             launch {
                 it.dirtyClose()
                 it.rejoin()
@@ -249,32 +269,36 @@ internal class ClientImpl(
     }
 
     private suspend fun rejoinChannels() {
-        channels.values.filter { it.isJoinedOnce }.forEach { it.rejoin() }
+        channelsSnapshot().filter { it.isJoinedOnce }.forEach { it.rejoin() }
     }
 
     override suspend fun join(topic: String, payload: JsonElement): Result<Channel> =
         join(topic, payload, defaultTimeout.toDynamicTimeout(true))
 
     override suspend fun join(topic: String, payload: JsonElement, timeout: DynamicTimeout): Result<Channel> {
-        val channel = channels.getOrPut(topic) {
-            val sendToSocket: suspend (String, JsonElement, DynamicTimeout, Boolean)
-            -> Result<IncomingMessage?> =
-                { event, payload, channelTimeout, noReply ->
-                    send(topic, event, payload, channelTimeout, noReply)
+        // Under the lock: concurrent joins of a topic get the same channel.
+        val channel = synchronized(channelsLock) {
+            channels.getOrPut(topic) {
+                val sendToSocket: suspend (String, JsonElement, DynamicTimeout, Boolean)
+                -> Result<IncomingMessage?> =
+                    { event, payload, channelTimeout, noReply ->
+                        send(topic, event, payload, channelTimeout, noReply)
+                    }
+
+                val disposeFromSocket: suspend (topic: String) -> Unit = {
+                    channel(topic)?.let {
+                        // Removed after closing: phx_leave is sent through the channel found by topic.
+                        it.close()
+                        removeChannel(topic, it)
+                    }
                 }
 
-            val disposeFromSocket: suspend (topic: String) -> Unit = {
-                channels[topic]?.let {
-                    it.close()
-                    channels.remove(topic)
+                val topicMessages = messages.filter {
+                    it.topic == topic
                 }
-            }
 
-            val topicMessages = messages.filter {
-                it.topic == topic
+                return@getOrPut ChannelImpl(topic, topicMessages, sendToSocket, disposeFromSocket)
             }
-
-            return@getOrPut ChannelImpl(topic, topicMessages, sendToSocket, disposeFromSocket)
         }
 
         return if (!state.value.active) {
@@ -453,11 +477,11 @@ internal class ClientImpl(
 
         _state.update { ClientState(active = false, connectionState = it.connectionState) }
 
-        // Iterate over a copy: leave() removes the channel from the map.
+        // Iterate over a snapshot: leave() removes the channel from the map.
         coroutineScope {
-            channels.values.toList().forEach { launch { it.leave() } }
+            channelsSnapshot().forEach { launch { it.leave() } }
         }
-        channels.clear()
+        synchronized(channelsLock) { channels.clear() }
 
         webSocketEngine.close()
     }
