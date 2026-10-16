@@ -1,9 +1,11 @@
 package phoenixclient
 
+import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.Serializable
+import phoenixclient.engine.WebSocketEngine
 import kotlin.test.*
 
 @Serializable
@@ -335,6 +337,38 @@ class ChannelTest : EngineTest() {
 
                 channels.forEach { assertEquals(ChannelState.CLOSE, it.state.first()) }
             }
+        }
+    }
+
+    @Test
+    @ExperimentalCoroutinesApi
+    fun testConcurrentLeaves() = runRepeatedTest(5) {
+        withContext(Dispatchers.Default) {
+            withTimeout(5000) {
+                val engine = LeaveCountingEngine(createEngine())
+                val client = phoenixClient(engine, port = TEST_SERVER_PORT, ssl = false).getOrThrow()
+                client.connect(mapOf("token" to "user1234"))
+                val channel = client.join("test:1").getOrThrow()
+
+                // A single phx_leave is sent, and every leave() returns once the channel is closed.
+                (1..10).map { async { channel.leave() } }.awaitAll()
+
+                assertEquals(1, engine.leaves.value)
+                assertEquals(ChannelState.CLOSE, channel.state.first())
+
+                client.disconnect()
+            }
+        }
+    }
+
+    private class LeaveCountingEngine(private val engine: WebSocketEngine) : WebSocketEngine by engine {
+        val leaves = atomic(0)
+
+        override fun send(message: OutgoingMessage): Result<Unit> {
+            if (message.event == "phx_leave") {
+                leaves.incrementAndGet()
+            }
+            return engine.send(message)
         }
     }
 

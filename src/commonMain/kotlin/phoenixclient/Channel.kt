@@ -106,24 +106,38 @@ internal class ChannelImpl(
     }
 
     internal suspend fun close(timeout: Long = defaultTimeout) {
-        if (state.value == ChannelState.LEAVING
-            || state.value == ChannelState.CLOSE
-        ) {
+        // Atomic transition to LEAVING: concurrent closes must send a single phx_leave, and must not clear
+        // the join ref while it is being sent.
+        var previous: ChannelState
+        while (true) {
+            previous = state.value
+            when (previous) {
+                ChannelState.CLOSE -> {
+                    _joinRef = null
+                    return
+                }
+
+                ChannelState.LEAVING -> {
+                    // Another close is in progress: return once the channel is closed.
+                    state.first { it == ChannelState.CLOSE }
+                    return
+                }
+
+                else -> if (_state.compareAndSet(previous, ChannelState.LEAVING)) break
+            }
+        }
+
+        try {
+            // Send phx_leave before clearing the join ref: the server drops it without the current join_ref.
+            if (previous == ChannelState.JOINED) {
+                // Don't care about the result.
+                sendToSocket("phx_leave", emptyPayload, timeout.toDynamicTimeout(), false)
+            }
+        } finally {
+            // Also when cancelled, so that the channel never stays LEAVING.
             _joinRef = null
-            return
+            _state.update { ChannelState.CLOSE }
         }
-
-        val wasJoined = state.value == ChannelState.JOINED
-        _state.update { ChannelState.LEAVING }
-
-        // Send phx_leave before clearing the join ref: the server drops it without the current join_ref.
-        if (wasJoined) {
-            // Don't care about the result.
-            sendToSocket("phx_leave", emptyPayload, timeout.toDynamicTimeout(), false)
-        }
-
-        _joinRef = null
-        _state.update { ChannelState.CLOSE }
     }
 
     internal suspend fun rejoin(timeout: DynamicTimeout = DEFAULT_REJOIN_TIMEOUT): Result<Channel> =
