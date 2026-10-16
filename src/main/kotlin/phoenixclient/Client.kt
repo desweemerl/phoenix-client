@@ -1,12 +1,13 @@
 package phoenixclient
 
 import co.touchlab.kermit.Logger
+import kotlinx.atomicfu.atomic
+import kotlinx.atomicfu.updateAndGet
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel.Factory.UNLIMITED
 import kotlinx.coroutines.flow.*
 import kotlinx.serialization.json.JsonElement
 import phoenixclient.engine.*
-import java.util.concurrent.atomic.AtomicLong
 
 
 enum class ConnectionState {
@@ -51,7 +52,7 @@ suspend inline fun <reified T> Client.join(topic: String, payload: T, noinline t
 
 fun refGenerator(): () -> Long {
     // Atomic since messages are sent concurrently from several threads.
-    val ref = AtomicLong(0L)
+    val ref = atomic(0L)
 
     return {
         ref.updateAndGet { if (it == Long.MAX_VALUE) 0 else it + 1 }
@@ -440,7 +441,8 @@ internal class ClientImpl(
     }
 }
 
-fun okHttpPhoenixClient(
+fun phoenixClient(
+    webSocketEngine: WebSocketEngine,
     host: String = DEFAULT_WS_HOST,
     port: Int = DEFAULT_WS_PORT,
     path: String = DEFAULT_WS_PATH,
@@ -450,9 +452,7 @@ fun okHttpPhoenixClient(
     heartbeatInterval: Long = DEFAULT_HEARTBEAT_INTERVAL,
     heartbeatTimeout: Long = DEFAULT_HEARTBEAT_TIMEOUT,
     defaultTimeout: Long = DEFAULT_TIMEOUT,
-    serializer: (message: OutgoingMessage) -> String = { it.toJson() },
-    deserializer: (input: String) -> IncomingMessage = ::fromJson,
-    dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    dispatcher: CoroutineDispatcher = Dispatchers.Default,
     scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ): Result<Client> =
     try {
@@ -467,10 +467,7 @@ fun okHttpPhoenixClient(
                 heartbeatInterval,
                 heartbeatTimeout,
                 defaultTimeout,
-                OkHttpEngine(
-                    serializer = serializer,
-                    deserializer = deserializer
-                ),
+                webSocketEngine,
                 dispatcher,
                 scope,
             )

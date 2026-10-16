@@ -22,6 +22,9 @@ dependencies {
     // Json serialization/deserialization. Exposed as api: payloads are JsonElement and decoded with serializers.
     api "org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0"
 
+    // Multiplatform atomics
+    implementation "org.jetbrains.kotlinx:atomicfu:0.33.0"
+
     // Companion library for Kotlin. Exposed as api: the public API returns Flow.
     def coroutine_version = "1.11.0"
     api "org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutine_version"

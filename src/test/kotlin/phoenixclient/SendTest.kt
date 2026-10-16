@@ -46,11 +46,7 @@ class SendTest {
     fun testReplyReceivedBeforeListening() = runTest {
         withContext(Dispatchers.Default) {
             withTimeout(5000) {
-                val client = ClientImpl(
-                    webSocketEngine = InstantReplyEngine(),
-                    dispatcher = Dispatchers.Default,
-                    scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
-                )
+                val client = phoenixClient(InstantReplyEngine()).getOrThrow()
 
                 client.connect()
                 val channel = client.join("test:1").getOrThrow()
