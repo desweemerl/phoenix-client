@@ -1,8 +1,7 @@
 package phoenixclient
 
 import kotlinx.serialization.Serializable
-import org.junit.jupiter.api.Assertions
-import org.junit.jupiter.api.Test
+import kotlin.test.*
 
 @Serializable
 data class TestPayload(
@@ -23,7 +22,7 @@ class OutgoingMessageTest {
         val output = message.toJson()
         val expected = """["1","2","test","myEvent",{"name":"hello"}]"""
 
-        Assertions.assertEquals(output, expected)
+        assertEquals(expected, output)
     }
 
     @Test
@@ -38,7 +37,7 @@ class OutgoingMessageTest {
         val output = message.toJson()
         val expected = """["1","2","test","myEvent",{"name":"hello"}]"""
 
-        Assertions.assertEquals(output, expected)
+        assertEquals(expected, output)
     }
 
     @Test
@@ -51,6 +50,6 @@ class OutgoingMessageTest {
         val output = message.toJson()
         val expected = """[null,"2","test","myEvent",{}]"""
 
-        Assertions.assertEquals(output, expected)
+        assertEquals(expected, output)
     }
 }

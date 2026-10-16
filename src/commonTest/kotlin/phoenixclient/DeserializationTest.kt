@@ -6,9 +6,9 @@ import kotlinx.serialization.SerializationException
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
-import org.junit.jupiter.api.Test
+import kotlin.test.*
 
-class DeserializationTest {
+abstract class DeserializationTest : EngineTest() {
 
     @Serializable
     data class TestReplyObject(
@@ -46,7 +46,7 @@ class DeserializationTest {
                 client.connect(mapOf("token" to "user1234"))
                 job.join()
 
-                assert(
+                assertTrue(
                     response == TestReplyObject(
                         valueString = "test1234",
                         valueNumber = -1234.5678f,
@@ -85,7 +85,7 @@ class DeserializationTest {
                         valueBoolean = true,
                     )
                 }
-                assert(response?.list == expected)
+                assertTrue(response?.list == expected)
             }
         }
     }
@@ -113,7 +113,7 @@ class DeserializationTest {
 
                 // The response is a list, not an object with a "list" key.
                 val exception = response!!.exceptionOrNull()
-                assert(exception is SerializationException) { "unexpected result: $response" }
+                assertTrue(exception is SerializationException, "unexpected result: $response")
             }
         }
 
@@ -143,7 +143,7 @@ class DeserializationTest {
                 client.connect(mapOf("token" to "user1234"))
                 joinAll(job1, job2)
 
-                assert(
+                assertTrue(
                     response == TestReplyObject(
                         valueString = "test1234",
                         valueNumber = -1234.5678f,
@@ -158,8 +158,9 @@ class DeserializationTest {
         retry: DynamicTimeout = DEFAULT_RETRY,
         heartbeatInterval: Long = DEFAULT_HEARTBEAT_INTERVAL
     ): Client =
-        okHttpPhoenixClient(
-            port = 4000,
+        phoenixClient(
+            webSocketEngine = createEngine(),
+            port = TEST_SERVER_PORT,
             ssl = false,
             retryTimeout = retry,
             heartbeatInterval = heartbeatInterval,

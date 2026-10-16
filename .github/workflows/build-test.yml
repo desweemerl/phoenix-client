@@ -3,7 +3,7 @@ name: PhoenixClient CI
 on: [push]
 
 jobs:
-  build:
+  jvm:
     runs-on: ubuntu-latest
 
     steps:
@@ -25,29 +25,88 @@ jobs:
           otp-version: "27"
           elixir-version: "1.18"
 
-      - name: Build and run end-to-end tests
+      - name: Start the Phoenix test server
         working-directory: test
         run: |
           mix deps.get
           mix phx.server > /dev/null 2>&1 &
           timeout 300 sh -c "until nc -z 127.0.0.1 4000; do sleep 1; done"
-          cd ../;./gradlew build
+
+      - name: Run JVM tests (Ktor and OkHttp engines)
+        run: ./gradlew jvmTest koverHtmlReport
 
       - name: Archive reports
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Reports
+          name: Reports-jvm
           path: build/reports
 
-      - name: Archive the package
-        uses: actions/upload-artifact@v4
+  ios:
+    # The iOS simulator is only available on macOS.
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 11
+        uses: actions/setup-java@v4
         with:
-          name: Package
-          path: build/libs
+          java-version: "11"
+          distribution: "temurin"
+
+      - name: Change wrapper permissions
+        run: chmod +x ./gradlew
+
+      - name: Cache Kotlin/Native toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ hashFiles('build.gradle.kts') }}
+
+      # erlef/setup-beam doesn't support macOS.
+      - name: Set up Elixir
+        run: brew install elixir
+
+      - name: Start the Phoenix test server
+        working-directory: test
+        run: |
+          mix local.hex --force
+          mix deps.get
+          mix phx.server > /dev/null 2>&1 &
+          for i in $(seq 1 300); do nc -z 127.0.0.1 4000 && break; sleep 1; done
+
+      - name: Run iOS simulator tests (Ktor engine)
+        run: ./gradlew iosSimulatorArm64Test
+
+      - name: Archive reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Reports-ios
+          path: build/reports
+
+  publish:
+    # The iOS artifacts are built on macOS.
+    if: github.ref_type == 'tag'
+    needs: [jvm, ios]
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 11
+        uses: actions/setup-java@v4
+        with:
+          java-version: "11"
+          distribution: "temurin"
+
+      - name: Change wrapper permissions
+        run: chmod +x ./gradlew
 
       - name: Publish package
-        if: github.ref_type == 'tag'
         run: ./gradlew publish
         env:
           GITHUB_USERNAME: ${{ github.repository_owner }}

@@ -2,7 +2,6 @@ package phoenixclient.engine
 
 import co.touchlab.kermit.Logger
 import okhttp3.*
-import okhttp3.logging.HttpLoggingInterceptor
 import phoenixclient.*
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
@@ -33,9 +32,6 @@ fun getUntrustedOkHttpClient(): OkHttpClient {
     )
 
     val sslSocketFactory = sslContext.socketFactory
-
-    val logging = HttpLoggingInterceptor()
-    logging.level = HttpLoggingInterceptor.Level.BODY
 
     return OkHttpClient.Builder()
         .sslSocketFactory(sslSocketFactory, trustAllCerts[0])

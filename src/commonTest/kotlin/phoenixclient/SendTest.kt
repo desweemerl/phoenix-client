@@ -2,10 +2,9 @@ package phoenixclient
 
 import kotlinx.coroutines.*
 import kotlinx.coroutines.test.runTest
-import org.junit.jupiter.api.Test
+import kotlin.test.*
 import phoenixclient.engine.WebSocketEngine
 import phoenixclient.engine.WebSocketEvent
-import java.util.concurrent.ConcurrentHashMap
 
 // Engine that replies synchronously inside send(), followed by an unrelated message, so a reply
 // is only received if the client listens for it before sending the request.
@@ -50,7 +49,7 @@ class SendTest {
 
                 client.connect()
                 val channel = client.join("test:1").getOrThrow()
-                assert(channel.push("hello").isSuccess)
+                assertTrue(channel.push("hello").isSuccess)
 
                 client.disconnect()
             }
@@ -58,16 +57,15 @@ class SendTest {
     }
 
     @Test
-    fun testRefGeneratorIsUniqueAcrossThreads() = runBlocking {
+    fun testRefGeneratorIsUniqueAcrossThreads() = runTest {
         val nextRef = refGenerator()
-        val refs = ConcurrentHashMap.newKeySet<Long>()
 
-        (1..8).map {
-            launch(Dispatchers.Default) {
-                repeat(10_000) { refs.add(nextRef()) }
+        val refs = (1..8).map {
+            async(Dispatchers.Default) {
+                List(10_000) { nextRef() }
             }
-        }.joinAll()
+        }.awaitAll().flatten().toSet()
 
-        assert(refs.size == 80_000) { "only ${refs.size} unique refs out of 80000" }
+        assertTrue(refs.size == 80_000, "only ${refs.size} unique refs out of 80000")
     }
 }

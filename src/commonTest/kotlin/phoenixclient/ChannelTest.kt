@@ -4,13 +4,12 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.Serializable
-import org.junit.jupiter.api.RepeatedTest
-import org.junit.jupiter.api.Test
+import kotlin.test.*
 
 @Serializable
 class ReplyMessage(val message: String)
 
-class ChannelTest {
+abstract class ChannelTest : EngineTest() {
 
     @Test
     @ExperimentalCoroutinesApi
@@ -39,8 +38,8 @@ class ChannelTest {
                 job2.cancel()
                 client.disconnect()
 
-                assert(message1?.convertTo<ReplyMessage>()?.getOrNull()?.message == "hello toto")
-                assert(Regex("""^\d+$""").matches(message2?.ref!!))
+                assertTrue(message1?.convertTo<ReplyMessage>()?.getOrNull()?.message == "hello toto")
+                assertTrue(Regex("""^\d+$""").matches(message2?.ref!!))
             }
         }
     }
@@ -70,14 +69,14 @@ class ChannelTest {
                 disconnectionJob.join()
                 client.disconnect()
 
-                assert(connection == 3)
+                assertTrue(connection == 3)
             }
         }
     }
 
-    @RepeatedTest(10)
+    @Test
     @ExperimentalCoroutinesApi
-    fun testChannelCrashRejoin() = runTest {
+    fun testChannelCrashRejoin() = runRepeatedTest(10) {
         withContext(Dispatchers.Default) {
             withTimeout(5000) {
                 val client = getClient()
@@ -100,14 +99,14 @@ class ChannelTest {
                 job.join()
                 client.disconnect()
 
-                assert(countJoined == 2)
+                assertTrue(countJoined == 2)
             }
         }
     }
 
-    @RepeatedTest(10)
+    @Test
     @ExperimentalCoroutinesApi
-    fun testChannelWrongChannel() = runTest {
+    fun testChannelWrongChannel() = runRepeatedTest(10) {
         withContext(Dispatchers.Default) {
             var joinRef2: String? = null
             var resultRef: String? = null
@@ -120,11 +119,11 @@ class ChannelTest {
                     val channel = client.join("test:1").getOrThrow()
                     val joinRef1 = channel.joinRef
 
-                    assert(channel.push("wrong_request").exceptionOrNull() is ChannelException)
+                    assertTrue(channel.push("wrong_request").exceptionOrNull() is ChannelException)
 
-                    assert(channel.push("hello", TestPayload(name = "toto"), 100L).isSuccess)
+                    assertTrue(channel.push("hello", TestPayload(name = "toto"), 100L).isSuccess)
                     joinRef2 = channel.joinRef
-                    assert(joinRef1 != null && joinRef2 != null && joinRef1 != joinRef2)
+                    assertTrue(joinRef1 != null && joinRef2 != null && joinRef1 != joinRef2)
                 }
 
                 val job2 = launch {
@@ -141,16 +140,16 @@ class ChannelTest {
                 job1.join()
                 job2.join()
 
-                assert(joinRef2 == resultRef)
+                assertTrue(joinRef2 == resultRef)
 
                 client.disconnect()
             }
         }
     }
 
-    @RepeatedTest(10)
+    @Test
     @ExperimentalCoroutinesApi
-    fun testChannelBatch() = runTest {
+    fun testChannelBatch() = runRepeatedTest(10) {
         withContext(Dispatchers.Default) {
             withTimeout(10000) {
                 val client = getClient()
@@ -186,8 +185,8 @@ class ChannelTest {
                 client.disconnect()
                 println("counter1: $counter1 counter2: $counter2")
 
-                assert(counter1 == size)
-                assert(counter2 == size)
+                assertTrue(counter1 == size)
+                assertTrue(counter2 == size)
             }
         }
     }
@@ -210,7 +209,7 @@ class ChannelTest {
                 job.join()
                 client.disconnect()
 
-                assert(
+                assertTrue(
                     reply?.convertTo<ReplyMessage>()?.getOrNull()?.message == "hello toto"
                 )
             }
@@ -236,12 +235,12 @@ class ChannelTest {
                 channel.leave()
 
                 // The server only replies when phx_leave was sent with the current join_ref.
-                assert(leaveReply.await().hasStatus("ok"))
-                assert(channel.state.first() == ChannelState.CLOSE)
+                assertTrue(leaveReply.await().hasStatus("ok"))
+                assertTrue(channel.state.first() == ChannelState.CLOSE)
 
                 // The topic can be joined again after leaving.
                 val rejoined = client.join("test:1").getOrThrow()
-                assert(rejoined.push("hello", TestPayload(name = "toto")).isSuccess)
+                assertTrue(rejoined.push("hello", TestPayload(name = "toto")).isSuccess)
 
                 client.disconnect()
             }
@@ -259,7 +258,7 @@ class ChannelTest {
 
                 client.disconnect()
 
-                channels.forEach { assert(it.state.first() == ChannelState.CLOSE) }
+                channels.forEach { assertTrue(it.state.first() == ChannelState.CLOSE) }
             }
         }
     }
@@ -276,7 +275,7 @@ class ChannelTest {
                 // gets the server's refusal again, not "already joining".
                 repeat(2) {
                     val exception = client.join("test:refused").exceptionOrNull()
-                    assert(exception is ResponseException) { "attempt $it: $exception" }
+                    assertTrue(exception is ResponseException, "attempt $it: $exception")
                 }
 
                 client.disconnect()
@@ -284,9 +283,9 @@ class ChannelTest {
         }
     }
 
-    @RepeatedTest(5)
+    @Test
     @ExperimentalCoroutinesApi
-    fun testChannelConcurrentPushes() = runTest {
+    fun testChannelConcurrentPushes() = runRepeatedTest(5) {
         withContext(Dispatchers.Default) {
             withTimeout(10000) {
                 val client = getClient()
@@ -304,7 +303,7 @@ class ChannelTest {
 
                 replies.forEach { (i, reply) ->
                     val message = reply.getOrThrow().convertTo<ReplyMessage>().getOrThrow().message
-                    assert(message == "hello toto$i") { "push $i got '$message'" }
+                    assertTrue(message == "hello toto$i", "push $i got '$message'")
                 }
             }
         }
@@ -314,8 +313,9 @@ class ChannelTest {
         retry: DynamicTimeout = DEFAULT_RETRY,
         heartbeatInterval: Long = DEFAULT_HEARTBEAT_INTERVAL
     ): Client =
-        okHttpPhoenixClient(
-            port = 4000,
+        phoenixClient(
+            webSocketEngine = createEngine(),
+            port = TEST_SERVER_PORT,
             ssl = false,
             retryTimeout = retry,
             heartbeatInterval = heartbeatInterval,

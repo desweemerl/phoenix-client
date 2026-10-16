@@ -5,10 +5,11 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.runTest
-import org.junit.jupiter.api.Test
+import phoenixclient.engine.DEFAULT_WS_PATH
+import kotlin.test.*
 
 
-class ClientTest {
+abstract class ClientTest : EngineTest() {
 
     @Test
     @ExperimentalCoroutinesApi
@@ -25,8 +26,31 @@ class ClientTest {
                 job.join()
                 client.disconnect()
 
-                assert(forbidden)
-                assert(!client.active)
+                assertTrue(forbidden)
+                assertTrue(!client.active)
+            }
+        }
+    }
+
+    @Test
+    @ExperimentalCoroutinesApi
+    fun testRefusedConnectionIsRetried() = runTest {
+        withContext(Dispatchers.Default) {
+            withTimeout(5000) {
+                // The server refuses the upgrade on an unknown path, but not with 403.
+                val client = getClient(path = "/unknown")
+                val failure = async(start = CoroutineStart.UNDISPATCHED) {
+                    client.messages.filter { it == Failure || it == Forbidden }.first()
+                }
+
+                client.connect(mapOf("token" to "user1234"))
+                val message = failure.await()
+
+                // Unlike Forbidden, a failure keeps the client active: it reconnects.
+                assertEquals(Failure, message)
+                assertTrue(client.active)
+
+                client.disconnect()
             }
         }
     }
@@ -46,7 +70,7 @@ class ClientTest {
                 job.join()
                 client.disconnect()
 
-                assert(isConnected)
+                assertTrue(isConnected)
             }
         }
     }
@@ -81,13 +105,13 @@ class ClientTest {
             client.state.waitDisconnected()
 
             delay(4000L)
-            assert(counter > 0 && refCounter == counter)
+            assertTrue(counter > 0 && refCounter == counter)
 
             client.connect(mapOf("token" to "user1234"))
             client.state.waitConnected()
 
             delay(4000L)
-            assert(refCounter != counter)
+            assertTrue(refCounter != counter)
 
             client.disconnect()
             job.cancel()
@@ -116,19 +140,22 @@ class ClientTest {
                 client.disconnect()
 
                 val values = reply?.convertTo<Map<String, String>>()?.getOrThrow()
-                assert(values?.get("header1") == "value1")
-                assert(values?.get("header2") == "value2")
+                assertTrue(values?.get("header1") == "value1")
+                assertTrue(values?.get("header2") == "value2")
             }
         }
     }
 
     private fun getClient(
+        path: String = DEFAULT_WS_PATH,
         heartbeatInterval: Long = DEFAULT_HEARTBEAT_INTERVAL,
         heartbeatTimeout: Long = DEFAULT_HEARTBEAT_TIMEOUT,
         defaultTimeout: Long = DEFAULT_TIMEOUT,
     ): Client =
-        okHttpPhoenixClient(
-            port = 4000,
+        phoenixClient(
+            webSocketEngine = createEngine(),
+            port = TEST_SERVER_PORT,
+            path = path,
             ssl = false,
             heartbeatInterval = heartbeatInterval,
             heartbeatTimeout = heartbeatTimeout,

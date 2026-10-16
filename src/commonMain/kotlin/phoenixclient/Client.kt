@@ -452,7 +452,7 @@ fun phoenixClient(
     heartbeatInterval: Long = DEFAULT_HEARTBEAT_INTERVAL,
     heartbeatTimeout: Long = DEFAULT_HEARTBEAT_TIMEOUT,
     defaultTimeout: Long = DEFAULT_TIMEOUT,
-    dispatcher: CoroutineDispatcher = Dispatchers.Default,
+    dispatcher: CoroutineDispatcher = ioDispatcher,
     scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ): Result<Client> =
     try {
