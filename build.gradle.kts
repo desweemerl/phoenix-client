@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     kotlin("multiplatform") version "2.4.21"
     kotlin("plugin.serialization") version "2.4.21"
@@ -18,9 +20,15 @@ val coroutinesVersion = "1.11.0"
 val ktorVersion = "3.6.0"
 
 kotlin {
-    jvmToolchain(11)
+    // Built and tested with the latest LTS JDK.
+    jvmToolchain(25)
 
     jvm {
+        // The published library still targets Java 11 (bytecode and JDK API), for Android and older JVMs.
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_11)
+            freeCompilerArgs.add("-Xjdk-release=11")
+        }
         testRuns["test"].executionTask.configure {
             useJUnitPlatform()
         }
