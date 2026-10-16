@@ -123,7 +123,7 @@ class ChannelTest : EngineTest() {
 
                     assertTrue(channel.push("wrong_request").exceptionOrNull() is ChannelException)
 
-                    assertTrue(channel.push("hello", TestPayload(name = "toto"), 100L).isSuccess)
+                    assertTrue(channel.push("hello", TestPayload(name = "toto"), 1_000L).isSuccess)
                     joinRef2 = channel.joinRef
                     assertTrue(joinRef1 != null && joinRef2 != null && joinRef1 != joinRef2)
                 }
@@ -163,9 +163,10 @@ class ChannelTest : EngineTest() {
                     client.state.waitConnected()
                     val channel = client.join("test:1").getOrThrow()
 
+                    // The timeout leaves room for slow CI runners: this checks that every reply arrives, not latency.
                     repeat(size) {
                         val name = "toto$counter1"
-                        channel.push("hello", TestPayload(name = name), 100L).getOrThrow()
+                        channel.push("hello", TestPayload(name = name), 1_000L).getOrThrow()
                         counter1++
                     }
                 }
@@ -204,7 +205,7 @@ class ChannelTest : EngineTest() {
                 val job = launch {
                     client.state.waitConnected()
                     val channel = client.join("test:1").getOrThrow()
-                    reply = channel.push("hello", TestPayload(name = "toto"), 100L).getOrThrow()
+                    reply = channel.push("hello", TestPayload(name = "toto"), 1_000L).getOrThrow()
                 }
 
                 client.connect(mapOf("token" to "user1234"))
