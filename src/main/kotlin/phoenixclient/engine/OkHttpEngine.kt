@@ -1,6 +1,6 @@
 package phoenixclient.engine
 
-import io.github.oshai.kotlinlogging.KotlinLogging
+import co.touchlab.kermit.Logger
 import okhttp3.*
 import okhttp3.logging.HttpLoggingInterceptor
 import phoenixclient.*
@@ -49,7 +49,7 @@ class OkHttpEngine(
     val deserializer: (String) -> IncomingMessage = ::fromJson,
 ) : WebSocketEngine {
     // Logger
-    private val logger = KotlinLogging.logger {}
+    private val logger = Logger.withTag("PhoenixClient.OkHttpEngine")
     private var ws: WebSocket? = null
 
     override suspend fun connect(
@@ -100,7 +100,7 @@ class OkHttpEngine(
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                logger.error { "Got a failure on WebSocket: " + t.message }
+                logger.e { "Got a failure on WebSocket: " + t.message }
 
                 if (!closed) {
                     val message = when (response?.message?.lowercase()) {
@@ -126,23 +126,23 @@ class OkHttpEngine(
         try {
             ws = client.newWebSocket(request, listener)
         } catch (ex: Exception) {
-            logger.error(ex) { "Failed to setup WebSocket" }
+            logger.e(ex) { "Failed to setup WebSocket" }
             throw ex
         }
     }
 
     override fun send(message: OutgoingMessage): Result<Unit> =
         try {
-            logger.debug { "Send message $message to WebSocket" }
+            logger.d { "Send message $message to WebSocket" }
             ws!!.send(serializer(message))
             Result.success(Unit)
         } catch (ex: Exception) {
-            logger.error { "Failed to send message $message to WebSocket: ${ex.stackTraceToString()}" }
+            logger.e { "Failed to send message $message to WebSocket: ${ex.stackTraceToString()}" }
             Result.failure(ex)
         }
 
     override fun close() {
-        logger.info { "Closing WebSocket" }
+        logger.i { "Closing WebSocket" }
         ws?.close(1001, "Closing WebSocket")
     }
 }

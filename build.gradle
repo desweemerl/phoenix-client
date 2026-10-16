@@ -15,10 +15,9 @@ repositories {
 }
 
 dependencies {
-    // Multiplatform logger, backed by slf4j on the JVM. The logging backend is left to the application.
-    implementation "io.github.oshai:kotlin-logging:8.0.4"
-    implementation "org.slf4j:slf4j-api:2.0.17"
-    testRuntimeOnly "org.slf4j:slf4j-simple:2.0.17"
+    // Multiplatform logger: Logcat on Android, OSLog on iOS, console elsewhere.
+    // Applications configure it through Kermit's global Logger (writers, minimum severity).
+    implementation "co.touchlab:kermit:2.2.0"
 
     // Json serialization/deserialization. Exposed as api: payloads are JsonElement and decoded with serializers.
     api "org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0"

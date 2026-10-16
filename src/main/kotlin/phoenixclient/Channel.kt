@@ -1,7 +1,7 @@
 package phoenixclient
 
+import co.touchlab.kermit.Logger
 import kotlinx.coroutines.flow.*
-import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.serialization.json.JsonElement
 
 enum class ChannelState {
@@ -55,7 +55,7 @@ internal class ChannelImpl(
     private val disposeFromSocket: suspend (topic: String) -> Unit,
     private val defaultTimeout: Long = DEFAULT_TIMEOUT,
 ) : Channel {
-    private val logger = KotlinLogging.logger {}
+    private val logger = Logger.withTag("PhoenixClient.Channel")
 
     private val _state = MutableStateFlow(ChannelState.CLOSE)
     override val state = _state.asStateFlow()
@@ -101,7 +101,7 @@ internal class ChannelImpl(
     }
 
     internal fun dirtyClose() {
-        logger.debug { "Dirty closing channel with topic '$topic'" }
+        logger.d { "Dirty closing channel with topic '$topic'" }
         _state.update { ChannelState.CLOSE }
     }
 
@@ -154,7 +154,7 @@ internal class ChannelImpl(
 
                 sendToSocket("phx_join", payload, timeout, false).map { it!! }
                     .onSuccess {
-                        logger.debug { "Channel with topic '$topic' was joined" }
+                        logger.d { "Channel with topic '$topic' was joined" }
                         // Set the join ref before publishing JOINED: pushes waiting on that state
                         // read it right away, and the server drops messages with a stale join_ref.
                         _joinRef = it.ref
@@ -163,7 +163,7 @@ internal class ChannelImpl(
                     .onFailure {
                         // Back to CLOSE so that the channel can be joined again.
                         _state.update { ChannelState.CLOSE }
-                        logger.error { "Failed to join channel with '$topic': " + it.stackTraceToString() }
+                        logger.e { "Failed to join channel with '$topic': " + it.stackTraceToString() }
                     }
                     .map { this }
             }
