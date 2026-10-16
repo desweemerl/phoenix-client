@@ -22,8 +22,8 @@ jobs:
       - name: Set up Elixir
         uses: erlef/setup-beam@v1
         with:
-          otp-version: "27"
-          elixir-version: "1.18"
+          otp-version: "29"
+          elixir-version: "1.20"
 
       - name: Start the Phoenix test server
         working-directory: test
@@ -32,7 +32,7 @@ jobs:
           mix phx.server > /dev/null 2>&1 &
           timeout 300 sh -c "until nc -z 127.0.0.1 4000; do sleep 1; done"
 
-      - name: Run JVM tests (Ktor and OkHttp engines)
+      - name: Run JVM tests
         run: ./gradlew jvmTest koverHtmlReport
 
       - name: Archive reports
