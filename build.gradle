@@ -1,42 +1,41 @@
 plugins {
-    id "org.jetbrains.kotlin.jvm" version "1.9.22"
-    id "org.jetbrains.kotlin.plugin.serialization" version "1.6.0"
+    id "org.jetbrains.kotlin.jvm" version "2.4.21"
+    id "org.jetbrains.kotlin.plugin.serialization" version "2.4.21"
 
     id "java-library"
     id "jacoco"
     id "maven-publish"
 }
 
-group "com.desweemerl"
-version "0.1.1"
+group = "com.desweemerl"
+version = "0.1.1"
 
 repositories {
     mavenCentral()
 }
 
 dependencies {
-    // Multi-platform logger + slf4j
-    implementation "io.github.microutils:kotlin-logging-jvm:3.0.5"
-    implementation group: "commons-collections", name: "commons-collections", version: "3.2.2"
-    implementation group: "org.slf4j", name: "slf4j-api", version: "2.0.9"
-    implementation group: "org.slf4j", name: "slf4j-simple", version: "2.0.9"
+    // Multiplatform logger, backed by slf4j on the JVM. The logging backend is left to the application.
+    implementation "io.github.oshai:kotlin-logging:8.0.4"
+    implementation "org.slf4j:slf4j-api:2.0.17"
+    testRuntimeOnly "org.slf4j:slf4j-simple:2.0.17"
 
-    // Json serialization/deserialization
-    implementation "com.google.code.gson:gson:2.10.1"
+    // Json serialization/deserialization. Exposed as api: payloads are JsonElement and decoded with serializers.
+    api "org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0"
 
-    // Companion library for Kotlin
-    def coroutine_version = "1.8.0"
-    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutine_version"
+    // Companion library for Kotlin. Exposed as api: the public API returns Flow.
+    def coroutine_version = "1.11.0"
+    api "org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutine_version"
     testImplementation "org.jetbrains.kotlinx:kotlinx-coroutines-test:$coroutine_version"
 
     def okhttp_version = "4.12.0"
     implementation "com.squareup.okhttp3:okhttp:$okhttp_version"
     implementation "com.squareup.okhttp3:logging-interceptor:$okhttp_version"
 
-    //implementation "org.jetbrains.kotlin:kotlin-stdlib"
     def junit_jupiter_version = "5.10.2"
     testImplementation "org.junit.jupiter:junit-jupiter-api:$junit_jupiter_version"
     testRuntimeOnly "org.junit.jupiter:junit-jupiter-engine:$junit_jupiter_version"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
 }
 
 kotlin {

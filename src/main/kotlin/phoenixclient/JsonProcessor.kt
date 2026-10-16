@@ -1,12 +1,12 @@
 package phoenixclient
 
-import com.google.gson.Gson
-import com.google.gson.GsonBuilder
+import kotlinx.serialization.json.Json
 
-val JsonProcessor: Gson =
-    GsonBuilder()
-        .registerTypeAdapter(OutgoingMessage::class.java, OutgoingMessageSerializer)
-        .registerTypeAdapter(IncomingMessage::class.java, IncomingMessageDeserializer)
-        .create()
-
-fun OutgoingMessage.toJson(): String = JsonProcessor.toJson(this)
+val JsonProcessor: Json = Json {
+    // A payload class only needs to declare the fields it uses.
+    ignoreUnknownKeys = true
+    // Like Gson: properties with default values are sent, null properties are not, and missing
+    // nullable properties are decoded as null.
+    encodeDefaults = true
+    explicitNulls = false
+}

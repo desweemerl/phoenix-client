@@ -1,8 +1,10 @@
 package phoenixclient
 
+import kotlinx.serialization.Serializable
 import org.junit.jupiter.api.Assertions
 import org.junit.jupiter.api.Test
 
+@Serializable
 data class TestPayload(
     val name: String
 )
@@ -16,7 +18,7 @@ class OutgoingMessageTest {
             ref = "2",
             topic = "test",
             event = "myEvent",
-            payload = mapOf("name" to "hello")
+            payload = payloadOf(mapOf("name" to "hello"))
         )
         val output = message.toJson()
         val expected = """["1","2","test","myEvent",{"name":"hello"}]"""
@@ -31,7 +33,7 @@ class OutgoingMessageTest {
             ref = "2",
             topic = "test",
             event = "myEvent",
-            payload = TestPayload(name = "hello")
+            payload = payloadOf(TestPayload(name = "hello"))
         )
         val output = message.toJson()
         val expected = """["1","2","test","myEvent",{"name":"hello"}]"""

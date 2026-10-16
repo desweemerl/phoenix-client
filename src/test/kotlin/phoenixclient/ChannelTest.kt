@@ -3,9 +3,11 @@ package phoenixclient
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.Serializable
 import org.junit.jupiter.api.RepeatedTest
 import org.junit.jupiter.api.Test
 
+@Serializable
 class ReplyMessage(val message: String)
 
 class ChannelTest {
@@ -37,7 +39,7 @@ class ChannelTest {
                 job2.cancel()
                 client.disconnect()
 
-                assert(message1?.convertTo(ReplyMessage::class)?.getOrNull()?.message == "hello toto")
+                assert(message1?.convertTo<ReplyMessage>()?.getOrNull()?.message == "hello toto")
                 assert(Regex("""^\d+$""").matches(message2?.ref!!))
             }
         }
@@ -126,11 +128,9 @@ class ChannelTest {
                 }
 
                 val job2 = launch {
-                    data class Response(val message: String)
-
                     resultRef = client.messages
                         .filter { message ->
-                            val payload = message.payload?.convertTo(Response::class, "response")?.getOrNull()
+                            val payload = message.payload?.convertTo<ReplyMessage>("response")?.getOrNull()
                             payload?.message == "hello toto"
                         }
                         .map { it.joinRef }
@@ -211,7 +211,7 @@ class ChannelTest {
                 client.disconnect()
 
                 assert(
-                    reply?.convertTo(ReplyMessage::class)?.getOrNull()?.message == "hello toto"
+                    reply?.convertTo<ReplyMessage>()?.getOrNull()?.message == "hello toto"
                 )
             }
         }
@@ -303,7 +303,7 @@ class ChannelTest {
                 client.disconnect()
 
                 replies.forEach { (i, reply) ->
-                    val message = reply.getOrThrow().convertTo(ReplyMessage::class).getOrThrow().message
+                    val message = reply.getOrThrow().convertTo<ReplyMessage>().getOrThrow().message
                     assert(message == "hello toto$i") { "push $i got '$message'" }
                 }
             }

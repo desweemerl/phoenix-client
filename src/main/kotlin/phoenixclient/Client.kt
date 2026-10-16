@@ -3,7 +3,8 @@ package phoenixclient
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel.Factory.UNLIMITED
 import kotlinx.coroutines.flow.*
-import mu.KotlinLogging
+import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.serialization.json.JsonElement
 import phoenixclient.engine.*
 import java.util.concurrent.atomic.AtomicLong
 
@@ -37,9 +38,16 @@ interface Client {
     fun connect(params: Map<String, String> = mapOf(), headers: Map<String, String> = mapOf())
     suspend fun disconnect()
 
-    suspend fun join(topic: String, payload: Any = emptyPayload): Result<Channel>
-    suspend fun join(topic: String, payload: Any, timeout: DynamicTimeout): Result<Channel>
+    suspend fun join(topic: String, payload: JsonElement = emptyPayload): Result<Channel>
+    suspend fun join(topic: String, payload: JsonElement, timeout: DynamicTimeout): Result<Channel>
 }
+
+// Typed payloads: T must be @Serializable (or a Map, List, primitive...).
+suspend inline fun <reified T> Client.join(topic: String, payload: T): Result<Channel> =
+    join(topic, payloadOf(payload))
+
+suspend inline fun <reified T> Client.join(topic: String, payload: T, noinline timeout: DynamicTimeout): Result<Channel> =
+    join(topic, payloadOf(payload), timeout)
 
 fun refGenerator(): () -> Long {
     // Atomic since messages are sent concurrently from several threads.
@@ -99,7 +107,7 @@ internal class ClientImpl(
     private suspend fun send(
         topic: String,
         event: String,
-        payload: Any,
+        payload: JsonElement,
         timeout: DynamicTimeout,
         noReply: Boolean = false,
     ): Result<IncomingMessage?> {
@@ -140,10 +148,10 @@ internal class ClientImpl(
                                 return@withTimeout
                             }
                         } else if (!isLeaveEvent) {
-                            logger.debug(
-                                "Waiting for channel with topic '${channel.topic}' to join before sending "
-                                        + "message with event='$event' and payload='$payload'"
-                            )
+                            logger.debug {
+                                "Waiting for channel with topic '${channel.topic}' to join before sending " +
+                                        "message with event='$event' and payload='$payload'"
+                            }
 
                             channel.state.filter { it == ChannelState.JOINED }.first()
                         }
@@ -219,12 +227,12 @@ internal class ClientImpl(
         channels.values.filter { it.isJoinedOnce }.forEach { it.rejoin() }
     }
 
-    override suspend fun join(topic: String, payload: Any): Result<Channel> =
+    override suspend fun join(topic: String, payload: JsonElement): Result<Channel> =
         join(topic, payload, defaultTimeout.toDynamicTimeout(true))
 
-    override suspend fun join(topic: String, payload: Any, timeout: DynamicTimeout): Result<Channel> {
+    override suspend fun join(topic: String, payload: JsonElement, timeout: DynamicTimeout): Result<Channel> {
         val channel = channels.getOrPut(topic) {
-            val sendToSocket: suspend (String, Any, DynamicTimeout, Boolean)
+            val sendToSocket: suspend (String, JsonElement, DynamicTimeout, Boolean)
             -> Result<IncomingMessage?> =
                 { event, payload, channelTimeout, noReply ->
                     send(topic, event, payload, channelTimeout, noReply)
@@ -248,17 +256,17 @@ internal class ClientImpl(
             Result.failure(BadActionException("Socket is not active"))
         } else if (channel.isJoinedOnce) {
             if (channel.state.value != ChannelState.JOINED) {
-                logger.debug("WebSocket is connected and channel with topic '$topic' will be joined automatically")
+                logger.debug { "WebSocket is connected and channel with topic '$topic' will be joined automatically" }
             }
             Result.success(channel)
         } else if (
             state.value.connectionState == ConnectionState.CONNECTED
             && channel.state.value == ChannelState.CLOSE
         ) {
-            logger.debug("Joining channel with topic '$topic'")
+            logger.debug { "Joining channel with topic '$topic'" }
             channel.join(payload)
         } else {
-            logger.debug("Waiting WebSocket to be connected before joining channel with topic '$topic'")
+            logger.debug { "Waiting WebSocket to be connected before joining channel with topic '$topic'" }
 
             try {
                 dynamicTimer(timeout) {
@@ -276,7 +284,7 @@ internal class ClientImpl(
             return@coroutineScope
         }
 
-        logger.info("Launching webSocket")
+        logger.info { "Launching webSocket" }
         _state.update { ClientState(active = it.active, connectionState = ConnectionState.CONNECTING) }
 
         webSocketEngine.connect(
@@ -291,19 +299,19 @@ internal class ClientImpl(
             val incomingMessage = event.message
 
             if (incomingMessage != null) {
-                logger.debug("Receiving message from engine: {}", incomingMessage)
+                logger.debug { "Receiving message from engine: $incomingMessage" }
 
                 if (!_messages.tryEmit(incomingMessage)) {
-                    logger.warn("Failed to emit message: $incomingMessage")
+                    logger.warn { "Failed to emit message: $incomingMessage" }
                 }
 
                 if (!refMessages.tryEmit(incomingMessage)) {
-                    logger.warn("Failed to emit message for internal processing: $incomingMessage")
+                    logger.warn { "Failed to emit message for internal processing: $incomingMessage" }
                 }
 
                 // TODO: Check forbidden on both WebSocket and channel
                 if (incomingMessage == Forbidden) {
-                    logger.info("Received message 'forbidden'")
+                    logger.info { "Received message 'forbidden'" }
                     _state.update { ClientState(active = false, connectionState = it.connectionState) }
                 } else if (incomingMessage.isError()) {
                     launch {
@@ -315,7 +323,7 @@ internal class ClientImpl(
             val newState = event.state
 
             if (newState != null) {
-                logger.debug("Receiving new state '{}' from WebSocket engine", newState)
+                logger.debug { "Receiving new state '$newState' from WebSocket engine" }
                 _state.update { ClientState(active = it.active, connectionState = newState) }
             }
         }
@@ -335,7 +343,7 @@ internal class ClientImpl(
                     timeout = heartbeatTimeout.toDynamicTimeout(),
                 )
                 if (result.isFailure) {
-                    logger.debug("Reconnecting WebSocket because heartbeat gave error: ${result.exceptionOrNull()?.message}")
+                    logger.debug { "Reconnecting WebSocket because heartbeat gave error: ${result.exceptionOrNull()?.message}" }
                     webSocketEngine.close()
                 }
             }
@@ -363,7 +371,7 @@ internal class ClientImpl(
     }
 
     override fun connect(params: Map<String, String>, headers: Map<String, String>) {
-        logger.info("Connect client")
+        logger.info { "Connect client" }
 
         if (state.value.active) {
             throw Exception("WebSocket is already active")
@@ -377,7 +385,7 @@ internal class ClientImpl(
                 try {
                     monitorConnection(params = params, headers = headers)
                 } catch (ex: Exception) {
-                    logger.error("Failed to launch the WebSocket: ${ex.message}")
+                    logger.error { "Failed to launch the WebSocket: ${ex.message}" }
                     return@withContext
                 }
 
@@ -385,11 +393,9 @@ internal class ClientImpl(
                 var joinChannelsJob: Job? = null
 
                 state.collect {
-                    logger.debug(
-                        "Client state updated: active='{}' connectionState='{}'",
-                        it.active,
-                        it.connectionState
-                    )
+                    logger.debug {
+                        "Client state updated: active='${it.active}' connectionState='${it.connectionState}'"
+                    }
                     try {
                         if (!it.active) {
                             webSocketJob?.cancelAndJoin()
@@ -412,7 +418,7 @@ internal class ClientImpl(
                             monitorConnection(params = params, headers = headers)
                         }
                     } catch (ex: Exception) {
-                        logger.error("ex: ${ex.message}")
+                        logger.error { "ex: ${ex.message}" }
                     }
                 }
             }
@@ -420,7 +426,7 @@ internal class ClientImpl(
     }
 
     override suspend fun disconnect() {
-        logger.info("Disconnect client")
+        logger.info { "Disconnect client" }
 
         _state.update { ClientState(active = false, connectionState = it.connectionState) }
 

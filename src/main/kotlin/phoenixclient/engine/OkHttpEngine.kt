@@ -1,6 +1,6 @@
 package phoenixclient.engine
 
-import mu.KotlinLogging
+import io.github.oshai.kotlinlogging.KotlinLogging
 import okhttp3.*
 import okhttp3.logging.HttpLoggingInterceptor
 import phoenixclient.*
@@ -100,7 +100,7 @@ class OkHttpEngine(
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                logger.error("Got a failure on WebSocket: " + t.message)
+                logger.error { "Got a failure on WebSocket: " + t.message }
 
                 if (!closed) {
                     val message = when (response?.message?.lowercase()) {
@@ -126,23 +126,23 @@ class OkHttpEngine(
         try {
             ws = client.newWebSocket(request, listener)
         } catch (ex: Exception) {
-            logger.error("Failed to setup WebSocket: " + ex.printStackTrace())
+            logger.error(ex) { "Failed to setup WebSocket" }
             throw ex
         }
     }
 
     override fun send(message: OutgoingMessage): Result<Unit> =
         try {
-            logger.debug("Send message $message to WebSocket")
+            logger.debug { "Send message $message to WebSocket" }
             ws!!.send(serializer(message))
             Result.success(Unit)
         } catch (ex: Exception) {
-            logger.error("Failed to send message $message to WebSocket: ${ex.stackTraceToString()}")
+            logger.error { "Failed to send message $message to WebSocket: ${ex.stackTraceToString()}" }
             Result.failure(ex)
         }
 
     override fun close() {
-        logger.info("Closing WebSocket")
+        logger.info { "Closing WebSocket" }
         ws?.close(1001, "Closing WebSocket")
     }
 }

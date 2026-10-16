@@ -115,7 +115,7 @@ class ClientTest {
                 job.join()
                 client.disconnect()
 
-                val values = reply?.convertTo(Map::class)?.getOrThrow()
+                val values = reply?.convertTo<Map<String, String>>()?.getOrThrow()
                 assert(values?.get("header1") == "value1")
                 assert(values?.get("header2") == "value2")
             }

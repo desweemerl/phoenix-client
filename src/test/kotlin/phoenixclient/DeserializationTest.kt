@@ -1,6 +1,8 @@
 package phoenixclient
 
-import com.google.gson.annotations.SerializedName
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
@@ -8,17 +10,19 @@ import org.junit.jupiter.api.Test
 
 class DeserializationTest {
 
+    @Serializable
     data class TestReplyObject(
-        @SerializedName(value = "value_string")
+        @SerialName("value_string")
         val valueString: String,
-        @SerializedName(value = "value_number")
+        @SerialName("value_number")
         val valueNumber: Float,
-        @SerializedName(value = "value_boolean")
+        @SerialName("value_boolean")
         val valueBoolean: Boolean,
     )
 
+    @Serializable
     data class TestListReplyObject(
-        val list: ArrayList<TestReplyObject>
+        val list: List<TestReplyObject>
     )
 
     @Test
@@ -36,7 +40,7 @@ class DeserializationTest {
                         .join("test:1").getOrThrow()
                         .push("deserialize_object")
                         .getOrThrow()
-                    response = reply.convertTo(TestReplyObject::class).getOrThrow()
+                    response = reply.convertTo<TestReplyObject>().getOrThrow()
                 }
 
                 client.connect(mapOf("token" to "user1234"))
@@ -68,7 +72,7 @@ class DeserializationTest {
                         .join("test:1").getOrThrow()
                         .push("deserialize_list")
                         .getOrThrow()
-                    response = reply.convertTo(TestListReplyObject::class).getOrThrow()
+                    response = reply.convertTo<TestListReplyObject>().getOrThrow()
                 }
 
                 client.connect(mapOf("token" to "user1234"))
@@ -101,16 +105,15 @@ class DeserializationTest {
                         .join("test:1").getOrThrow()
                         .push("deserialize_list_failed")
                         .getOrThrow()
-                    response = reply.convertTo(TestListReplyObject::class)
+                    response = reply.convertTo<TestListReplyObject>()
                 }
 
                 client.connect(mapOf("token" to "user1234"))
                 job.join()
 
-                assert(
-                    response!!.exceptionOrNull()!!.message!!
-                        .contains("Expected BEGIN_OBJECT but was BEGIN_ARRAY at path")
-                )
+                // The response is a list, not an object with a "list" key.
+                val exception = response!!.exceptionOrNull()
+                assert(exception is SerializationException) { "unexpected result: $response" }
             }
         }
 
@@ -134,7 +137,7 @@ class DeserializationTest {
                 val job2 = launch {
                     response = client.messages
                         .filterEvent("test_event").first()
-                        .payload!!.convertTo(TestReplyObject::class).getOrThrow()
+                        .payload!!.convertTo<TestReplyObject>().getOrThrow()
                 }
 
                 client.connect(mapOf("token" to "user1234"))

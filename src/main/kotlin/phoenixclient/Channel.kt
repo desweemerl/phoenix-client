@@ -1,7 +1,8 @@
 package phoenixclient
 
 import kotlinx.coroutines.flow.*
-import mu.KotlinLogging
+import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.serialization.json.JsonElement
 
 enum class ChannelState {
     JOINING,
@@ -18,14 +19,27 @@ interface Channel {
     val messages: Flow<IncomingMessage>
     val joinRef: String?
 
-    suspend fun pushNoReply(event: String, payload: Any = emptyPayload): Result<Unit>
-    suspend fun pushNoReply(event: String, payload: Any, timeout: Long): Result<Unit>
+    suspend fun pushNoReply(event: String, payload: JsonElement = emptyPayload): Result<Unit>
+    suspend fun pushNoReply(event: String, payload: JsonElement, timeout: Long): Result<Unit>
 
-    suspend fun push(event: String, payload: Any = emptyPayload): Result<Reply>
-    suspend fun push(event: String, payload: Any, timeout: Long): Result<Reply>
+    suspend fun push(event: String, payload: JsonElement = emptyPayload): Result<Reply>
+    suspend fun push(event: String, payload: JsonElement, timeout: Long): Result<Reply>
 
     suspend fun leave()
 }
+
+// Typed payloads: T must be @Serializable (or a Map, List, primitive...).
+suspend inline fun <reified T> Channel.pushNoReply(event: String, payload: T): Result<Unit> =
+    pushNoReply(event, payloadOf(payload))
+
+suspend inline fun <reified T> Channel.pushNoReply(event: String, payload: T, timeout: Long): Result<Unit> =
+    pushNoReply(event, payloadOf(payload), timeout)
+
+suspend inline fun <reified T> Channel.push(event: String, payload: T): Result<Reply> =
+    push(event, payloadOf(payload))
+
+suspend inline fun <reified T> Channel.push(event: String, payload: T, timeout: Long): Result<Reply> =
+    push(event, payloadOf(payload), timeout)
 
 internal class ChannelImpl(
     override val topic: String,
@@ -33,7 +47,7 @@ internal class ChannelImpl(
 
     private val sendToSocket: suspend (
         event: String,
-        payload: Any,
+        payload: JsonElement,
         timeout: DynamicTimeout,
         noRepy: Boolean,
     )
@@ -46,7 +60,7 @@ internal class ChannelImpl(
     private val _state = MutableStateFlow(ChannelState.CLOSE)
     override val state = _state.asStateFlow()
 
-    private var joinPayload: Any? = null
+    private var joinPayload: JsonElement? = null
     private var _joinRef: String? = null
     override val joinRef: String?
         get() = _joinRef
@@ -59,20 +73,20 @@ internal class ChannelImpl(
     private fun <T> nonJoinedFailure(): Result<T> =
         Result.failure(BadActionException("Pushing message on non-joined channel is not allowed"))
 
-    override suspend fun pushNoReply(event: String, payload: Any): Result<Unit> =
+    override suspend fun pushNoReply(event: String, payload: JsonElement): Result<Unit> =
         pushNoReply(event, payload, defaultTimeout)
 
-    override suspend fun pushNoReply(event: String, payload: Any, timeout: Long): Result<Unit> =
+    override suspend fun pushNoReply(event: String, payload: JsonElement, timeout: Long): Result<Unit> =
         if (isJoinedOnce) {
             sendToSocket(event, payload, timeout.toDynamicTimeout(), true).map { }
         } else {
             nonJoinedFailure()
         }
 
-    override suspend fun push(event: String, payload: Any) =
+    override suspend fun push(event: String, payload: JsonElement) =
         push(event, payload, defaultTimeout)
 
-    override suspend fun push(event: String, payload: Any, timeout: Long)
+    override suspend fun push(event: String, payload: JsonElement, timeout: Long)
             : Result<Reply> =
         if (isJoinedOnce) {
             sendToSocket(event, payload, timeout.toDynamicTimeout(), false).fold(
@@ -87,7 +101,7 @@ internal class ChannelImpl(
     }
 
     internal fun dirtyClose() {
-        logger.debug("Dirty closing channel with topic '$topic'")
+        logger.debug { "Dirty closing channel with topic '$topic'" }
         _state.update { ChannelState.CLOSE }
     }
 
@@ -120,7 +134,7 @@ internal class ChannelImpl(
         }
 
     internal suspend fun join(
-        payload: Any = emptyPayload,
+        payload: JsonElement = emptyPayload,
         timeout: DynamicTimeout = DEFAULT_REJOIN_TIMEOUT,
     ): Result<Channel> =
         when (state.value) {
@@ -140,7 +154,7 @@ internal class ChannelImpl(
 
                 sendToSocket("phx_join", payload, timeout, false).map { it!! }
                     .onSuccess {
-                        logger.debug("Channel with topic '$topic' was joined")
+                        logger.debug { "Channel with topic '$topic' was joined" }
                         // Set the join ref before publishing JOINED: pushes waiting on that state
                         // read it right away, and the server drops messages with a stale join_ref.
                         _joinRef = it.ref
@@ -149,7 +163,7 @@ internal class ChannelImpl(
                     .onFailure {
                         // Back to CLOSE so that the channel can be joined again.
                         _state.update { ChannelState.CLOSE }
-                        logger.error("Failed to join channel with '$topic': " + it.stackTraceToString())
+                        logger.error { "Failed to join channel with '$topic': " + it.stackTraceToString() }
                     }
                     .map { this }
             }
