@@ -6,8 +6,6 @@ import kotlinx.coroutines.test.TestResult
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import phoenixclient.engine.KtorHttpEngine
-import phoenixclient.engine.PhoenixHttpEngine
-import phoenixclient.engine.PhoenixHttpServer
 import kotlin.time.Duration.Companion.minutes
 
 // Port of the Phoenix test server in /test.

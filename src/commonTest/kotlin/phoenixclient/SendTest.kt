@@ -3,12 +3,6 @@ package phoenixclient
 import kotlinx.coroutines.*
 import kotlinx.coroutines.test.runTest
 import kotlin.test.*
-import phoenixclient.engine.PhoenixHttpEngine
-import phoenixclient.engine.PhoenixHttpRequest
-import phoenixclient.engine.PhoenixHttpResponse
-import phoenixclient.engine.PhoenixHttpServer
-import phoenixclient.engine.PhoenixWebSocketConnection
-import phoenixclient.engine.PhoenixWebSocketEvent
 
 // Engine that replies synchronously inside send(), followed by an unrelated message, so a reply
 // is only received if the client listens for it before sending the request.

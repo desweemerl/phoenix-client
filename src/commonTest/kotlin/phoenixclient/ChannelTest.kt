@@ -5,9 +5,6 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.Serializable
-import phoenixclient.engine.PhoenixHttpEngine
-import phoenixclient.engine.PhoenixWebSocketConnection
-import phoenixclient.engine.PhoenixWebSocketEvent
 import kotlin.test.*
 
 @Serializable

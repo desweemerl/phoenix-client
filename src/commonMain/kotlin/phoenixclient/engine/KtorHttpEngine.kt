@@ -34,6 +34,12 @@ import phoenixclient.Failure
 import phoenixclient.HttpRequestException
 import phoenixclient.IncomingMessage
 import phoenixclient.OutgoingMessage
+import phoenixclient.PhoenixHttpEngine
+import phoenixclient.PhoenixHttpRequest
+import phoenixclient.PhoenixHttpResponse
+import phoenixclient.PhoenixHttpServer
+import phoenixclient.PhoenixWebSocketConnection
+import phoenixclient.PhoenixWebSocketEvent
 import phoenixclient.VSN
 import phoenixclient.WebSocketConnectException
 import phoenixclient.fromJson

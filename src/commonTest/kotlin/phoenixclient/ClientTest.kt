@@ -6,10 +6,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.Serializable
-import phoenixclient.engine.DEFAULT_SOCKET_PATH
-import phoenixclient.engine.PhoenixHttpBody
-import phoenixclient.engine.get
-import phoenixclient.engine.post
 import kotlin.test.*
 
 

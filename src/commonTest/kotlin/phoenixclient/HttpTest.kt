@@ -15,11 +15,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import phoenixclient.engine.KtorClient
 import phoenixclient.engine.KtorHttpEngine
-import phoenixclient.engine.PhoenixHttpBody
-import phoenixclient.engine.PhoenixHttpServer
-import phoenixclient.engine.delete
-import phoenixclient.engine.get
-import phoenixclient.engine.post
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals

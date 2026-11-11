@@ -1,20 +1,8 @@
-package phoenixclient.engine
+package phoenixclient
 
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.SerializationStrategy
 import kotlinx.serialization.json.Json
-import phoenixclient.ConnectionState
-import phoenixclient.DEFAULT_TIMEOUT
-import phoenixclient.HttpRequestException
-import phoenixclient.IncomingMessage
-import phoenixclient.OutgoingMessage
-import phoenixclient.WebSocketConnectException
-
-
-const val DEFAULT_PORT = 443
-const val DEFAULT_SSL = true
-const val DEFAULT_UNTRUSTED_CERTIFICATE = false
-const val DEFAULT_SOCKET_PATH = "/socket"
 
 /**
  * Server of a [PhoenixHttpEngine], shared by its WebSockets and its HTTP requests.
@@ -106,7 +94,7 @@ interface PhoenixWebSocketConnection {
 
 /**
  * HTTP requests and WebSockets to a Phoenix server ([server]), without exposing the library running them.
- * Implemented by [KtorHttpEngine]; applications can implement it to fake the server in tests.
+ * Implemented by [phoenixclient.engine.KtorHttpEngine]; applications can implement it to fake the server in tests.
  */
 interface PhoenixHttpEngine {
     val server: PhoenixHttpServer

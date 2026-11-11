@@ -3,6 +3,11 @@ package phoenixclient
 // Keep default values defined in https://github.com/phoenixframework/phoenix/blob/master/assets/js/phoenix/constants.js
 const val VSN = "2.0.0"
 
+const val DEFAULT_PORT = 443
+const val DEFAULT_SSL = true
+const val DEFAULT_UNTRUSTED_CERTIFICATE = false
+const val DEFAULT_SOCKET_PATH = "/socket"
+
 const val DEFAULT_HEARTBEAT_INTERVAL = 30000L // 30 secs
 const val DEFAULT_HEARTBEAT_TIMEOUT = 1000L // 1 sec
 const val DEFAULT_TIMEOUT = 10000L // 10 secs
