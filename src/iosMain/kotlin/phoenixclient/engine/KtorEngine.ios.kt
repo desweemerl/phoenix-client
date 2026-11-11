@@ -100,7 +100,7 @@ private val trustAnyCertificate: ChallengeHandler = { _, _, challenge, completio
 }
 
 @OptIn(UnsafeNumber::class)
-internal actual fun createPlatformHttpClient(untrustedCertificate: Boolean): PlatformHttpClient {
+internal actual fun createPlatformHttpClient(untrustedCertificate: Boolean): KtorClient {
     val ktorDelegate = KtorNSURLSessionDelegate(if (untrustedCertificate) trustAnyCertificate else null)
     val delegate = StatusRecordingDelegate(ktorDelegate)
 
@@ -117,5 +117,5 @@ internal actual fun createPlatformHttpClient(untrustedCertificate: Boolean): Pla
         install(WebSockets)
     }
 
-    return PlatformHttpClient(client) { delegate.lastFailedStatus }
+    return KtorClient(client) { delegate.lastFailedStatus }
 }

@@ -3,39 +3,43 @@ package phoenixclient
 import kotlinx.coroutines.*
 import kotlinx.coroutines.test.runTest
 import kotlin.test.*
-import phoenixclient.engine.WebSocketEngine
-import phoenixclient.engine.WebSocketEvent
+import phoenixclient.engine.PhoenixHttpEngine
+import phoenixclient.engine.PhoenixHttpRequest
+import phoenixclient.engine.PhoenixHttpResponse
+import phoenixclient.engine.PhoenixHttpServer
+import phoenixclient.engine.PhoenixWebSocketConnection
+import phoenixclient.engine.PhoenixWebSocketEvent
 
 // Engine that replies synchronously inside send(), followed by an unrelated message, so a reply
 // is only received if the client listens for it before sending the request.
-private class InstantReplyEngine : WebSocketEngine {
-    private var receiver: (WebSocketEvent) -> Unit = {}
+private class InstantReplyEngine : PhoenixHttpEngine {
+    override val server = PhoenixHttpServer("localhost")
 
-    override suspend fun connect(
-        host: String,
-        port: Int,
+    override suspend fun request(request: PhoenixHttpRequest): PhoenixHttpResponse =
+        throw HttpRequestException("not supported")
+
+    override suspend fun connectWebSocket(
         path: String,
         params: Map<String, String>,
         headers: Map<String, String>,
-        ssl: Boolean,
-        untrustedCertificate: Boolean,
-        receiver: (event: WebSocketEvent) -> Unit,
-    ) {
-        this.receiver = receiver
-        receiver(WebSocketEvent(state = ConnectionState.CONNECTED))
-    }
+        receiver: (event: PhoenixWebSocketEvent) -> Unit,
+    ): Result<PhoenixWebSocketConnection> =
+        Result.success(object : PhoenixWebSocketConnection {
+            override fun send(message: OutgoingMessage): Result<Unit> {
+                val joinRef = message.joinRef?.let { "\"$it\"" } ?: "null"
+                val reply =
+                    """[$joinRef,"${message.ref}","${message.topic}","phx_reply",{"status":"ok","response":{}}]"""
+                receiver(PhoenixWebSocketEvent(message = fromJson(reply)))
+                receiver(PhoenixWebSocketEvent(message = fromJson("""[null,null,"other","noise",{}]""")))
+                return Result.success(Unit)
+            }
 
-    override fun send(message: OutgoingMessage): Result<Unit> {
-        val joinRef = message.joinRef?.let { "\"$it\"" } ?: "null"
-        val reply = """[$joinRef,"${message.ref}","${message.topic}","phx_reply",{"status":"ok","response":{}}]"""
-        receiver(WebSocketEvent(message = fromJson(reply)))
-        receiver(WebSocketEvent(message = fromJson("""[null,null,"other","noise",{}]""")))
-        return Result.success(Unit)
-    }
+            override fun close() {
+                receiver(PhoenixWebSocketEvent(state = ConnectionState.DISCONNECTED))
+            }
+        })
 
-    override fun close() {
-        receiver(WebSocketEvent(state = ConnectionState.DISCONNECTED))
-    }
+    override fun close() {}
 }
 
 class SendTest {

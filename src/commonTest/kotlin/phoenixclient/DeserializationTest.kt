@@ -159,9 +159,7 @@ class DeserializationTest : EngineTest() {
         heartbeatInterval: Long = DEFAULT_HEARTBEAT_INTERVAL
     ): Client =
         phoenixClient(
-            webSocketEngine = createEngine(),
-            port = TEST_SERVER_PORT,
-            ssl = false,
+            httpEngine = createEngine(),
             retryTimeout = retry,
             heartbeatInterval = heartbeatInterval,
         ).getOrThrow()

@@ -60,7 +60,8 @@ data class Hello(val name: String)
 data class HelloReply(val message: String)
 
 suspend fun hello() {
-    val client = ktorPhoenixClient(host = "example.com").getOrThrow()
+    val engine = KtorHttpEngine(PhoenixHttpServer(host = "example.com"))
+    val client = phoenixClient(engine).getOrThrow()
 
     // Connects in the background, and reconnects whenever the connection is lost.
     client.connect(params = mapOf("token" to "user1234"))
@@ -72,6 +73,7 @@ suspend fun hello() {
     println(reply.convertTo<HelloReply>().getOrThrow().message)
 
     client.disconnect()
+    engine.close()
 }
 ```
 
@@ -85,24 +87,55 @@ end
 
 ### Creating a client
 
-`ktorPhoenixClient(...)` returns a `Result<Client>`. All parameters are optional:
+`KtorHttpEngine(server)` creates the engine of a server, running on the HTTP client of the platform (OkHttp on the
+JVM, `NSURLSession` (Darwin) on iOS):
+
+| `PhoenixHttpServer` | Default | Description |
+|---|---|---|
+| `host` | | Server host |
+| `port` | `443` | Server port |
+| `ssl` | `true` | `wss://` and `https://`, or `ws://` and `http://` |
+| `untrustedCertificate` | `false` | Accept any server certificate (development only) |
+
+`phoenixClient(engine, ...)` returns a `Result<Client>` running its WebSocket on that engine. Other parameters are
+optional:
 
 | Parameter | Default | Description |
 |---|---|---|
-| `host` | `"localhost"` | Server host |
-| `port` | `443` | Server port |
 | `path` | `"/socket"` | Socket path, as in `socket "/socket", ...` in the endpoint (`/websocket` is appended) |
-| `ssl` | `true` | `wss://` or `ws://` |
-| `untrustedCertificate` | `false` | Accept any server certificate (development only) |
 | `retryTimeout` | 10 ms, 50 ms … 2 s, then 5 s | Delay between reconnection attempts, by attempt number |
 | `heartbeatInterval` | 30 s | Interval between heartbeats; must be ≥ `defaultTimeout` |
 | `heartbeatTimeout` | 1 s | A heartbeat without reply within this delay closes the connection, which is then reopened |
 | `defaultTimeout` | 10 s | Timeout of `push` and `leave` |
-| `httpClient` | platform client | A custom Ktor `HttpClient`, which must install the `WebSockets` plugin |
 | `dispatcher` | `Dispatchers.IO` | Dispatcher running the connection |
 | `scope` | a new scope | Scope of the client's coroutines |
 
-By default, the WebSocket runs on OkHttp on the JVM and on `NSURLSession` (Darwin) on iOS.
+An engine can be shared by several clients (one WebSocket each, for example on different socket paths) and by the
+application's HTTP requests. A client only closes its own connection: `close()` the engine once it is no longer
+used, which closes every connection still open.
+
+### HTTP requests to the same server
+
+The engine also serves the application's HTTP requests to the same server, with the same certificate trust:
+
+```kotlin
+val response = engine.post("/api/v1/items", PhoenixHttpBody.json(item, Item.serializer()))
+if (response.isSuccess) {
+    val created = response.json(Item.serializer())
+}
+
+engine.get("/api/v1/items", query = listOf("ids[]" to "1", "ids[]" to "2"), timeout = 5000)
+```
+
+`request(PhoenixHttpRequest)` returns a `PhoenixHttpResponse` of any status, and throws `HttpRequestException` when
+no response is received (network, TLS, timeout...). `get`, `post`, `put`, `patch` and `delete` are shortcuts.
+
+- `path` is absolute and already percent-encoded (`"/items/a%20b"`): it is sent as is.
+- `query` parameters are given raw and encoded by the engine; a name can be repeated.
+- `timeout` covers the whole request, 10 s by default.
+
+The application depends on the `PhoenixHttpEngine` interface, which exposes no Ktor type, and tests can implement it
+to fake the server.
 
 ### Connection
 
@@ -203,8 +236,10 @@ exception in the app's `Info.plist`.
 
 ### Custom engine
 
-`phoenixClient(webSocketEngine, ...)` accepts any implementation of `WebSocketEngine`, for example to run on
-another transport or in tests.
+`phoenixClient(httpEngine, ...)` accepts any implementation of `PhoenixHttpEngine`, for example to run on another
+transport or in tests. `connectWebSocket` returns the connection once it is open, or a failure: a
+`WebSocketConnectException` with the status 403 makes the client inactive (reported as `Forbidden`), any other
+failure is retried. Its receiver then gets the incoming messages, and `DISCONNECTED` once when the connection ends.
 
 ## Development
 

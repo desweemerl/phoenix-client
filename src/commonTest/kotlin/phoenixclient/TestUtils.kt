@@ -5,8 +5,9 @@ import co.touchlab.kermit.Logger
 import kotlinx.coroutines.test.TestResult
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
-import phoenixclient.engine.KtorEngine
-import phoenixclient.engine.WebSocketEngine
+import phoenixclient.engine.KtorHttpEngine
+import phoenixclient.engine.PhoenixHttpEngine
+import phoenixclient.engine.PhoenixHttpServer
 import kotlin.time.Duration.Companion.minutes
 
 // Port of the Phoenix test server in /test.
@@ -20,7 +21,9 @@ fun runRepeatedTest(times: Int, body: suspend TestScope.() -> Unit): TestResult 
 
 // Base of the integration tests, which run against the Phoenix test server.
 abstract class EngineTest {
-    fun createEngine(): WebSocketEngine = KtorEngine()
+    val testServer = PhoenixHttpServer("localhost", TEST_SERVER_PORT, ssl = false)
+
+    fun createEngine(): PhoenixHttpEngine = KtorHttpEngine(testServer)
 
     init {
         // Print logs in the test reports on every platform (Kermit writes to OSLog on iOS).

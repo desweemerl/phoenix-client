@@ -5,7 +5,9 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.Serializable
-import phoenixclient.engine.WebSocketEngine
+import phoenixclient.engine.PhoenixHttpEngine
+import phoenixclient.engine.PhoenixWebSocketConnection
+import phoenixclient.engine.PhoenixWebSocketEvent
 import kotlin.test.*
 
 @Serializable
@@ -347,7 +349,7 @@ class ChannelTest : EngineTest() {
         withContext(Dispatchers.Default) {
             withTimeout(5000) {
                 val engine = LeaveCountingEngine(createEngine())
-                val client = phoenixClient(engine, port = TEST_SERVER_PORT, ssl = false).getOrThrow()
+                val client = phoenixClient(engine).getOrThrow()
                 client.connect(mapOf("token" to "user1234"))
                 val channel = client.join("test:1").getOrThrow()
 
@@ -362,15 +364,25 @@ class ChannelTest : EngineTest() {
         }
     }
 
-    private class LeaveCountingEngine(private val engine: WebSocketEngine) : WebSocketEngine by engine {
+    private class LeaveCountingEngine(private val engine: PhoenixHttpEngine) : PhoenixHttpEngine by engine {
         val leaves = atomic(0)
 
-        override fun send(message: OutgoingMessage): Result<Unit> {
-            if (message.event == "phx_leave") {
-                leaves.incrementAndGet()
+        override suspend fun connectWebSocket(
+            path: String,
+            params: Map<String, String>,
+            headers: Map<String, String>,
+            receiver: (event: PhoenixWebSocketEvent) -> Unit,
+        ): Result<PhoenixWebSocketConnection> =
+            engine.connectWebSocket(path, params, headers, receiver).map { connection ->
+                object : PhoenixWebSocketConnection by connection {
+                    override fun send(message: OutgoingMessage): Result<Unit> {
+                        if (message.event == "phx_leave") {
+                            leaves.incrementAndGet()
+                        }
+                        return connection.send(message)
+                    }
+                }
             }
-            return engine.send(message)
-        }
     }
 
     private fun getClient(
@@ -378,9 +390,7 @@ class ChannelTest : EngineTest() {
         heartbeatInterval: Long = DEFAULT_HEARTBEAT_INTERVAL
     ): Client =
         phoenixClient(
-            webSocketEngine = createEngine(),
-            port = TEST_SERVER_PORT,
-            ssl = false,
+            httpEngine = createEngine(),
             retryTimeout = retry,
             heartbeatInterval = heartbeatInterval,
         ).getOrThrow()

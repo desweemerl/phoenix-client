@@ -5,7 +5,11 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.runTest
-import phoenixclient.engine.DEFAULT_WS_PATH
+import kotlinx.serialization.Serializable
+import phoenixclient.engine.DEFAULT_SOCKET_PATH
+import phoenixclient.engine.PhoenixHttpBody
+import phoenixclient.engine.get
+import phoenixclient.engine.post
 import kotlin.test.*
 
 
@@ -28,6 +32,91 @@ class ClientTest : EngineTest() {
 
                 assertTrue(forbidden)
                 assertTrue(!client.active)
+            }
+        }
+    }
+
+    @Serializable
+    private data class Echo(
+        val method: String,
+        val path: String,
+        val query: Map<String, String>,
+        val content_type: String? = null,
+        val token: String? = null,
+        val body: String,
+    )
+
+    @Test
+    @ExperimentalCoroutinesApi
+    fun testSharedEngine() = runTest {
+        withContext(Dispatchers.Default) {
+            withTimeout(5000) {
+                val engine = createEngine()
+
+                // Shared with the application: it must still report a refused handshake as Forbidden (Darwin)
+                val refused = phoenixClient(engine).getOrThrow()
+                val forbidden = async(start = CoroutineStart.UNDISPATCHED) {
+                    refused.messages.filter { it == Forbidden }.first()
+                }
+
+                refused.connect(mapOf("token" to "wrongToken"))
+                forbidden.await()
+                refused.disconnect()
+                assertTrue(!refused.active)
+
+                // It serves the application's HTTP requests to the same server
+                val response = engine.post(
+                    "/api/items",
+                    PhoenixHttpBody.text("""{"a":1}""", "application/json"),
+                    headers = mapOf("X-Token" to "token"),
+                )
+                assertEquals(200, response.status)
+                assertEquals(
+                    Echo("POST", "/api/items", emptyMap(), "application/json", "token", """{"a":1}"""),
+                    response.json(Echo.serializer()),
+                )
+
+                val query = engine.get("/status/401", query = listOf("q" to "a b"))
+                assertEquals(401, query.status)
+                assertEquals(mapOf("q" to "a b"), query.json(Echo.serializer()).query)
+
+                // And several connections: disconnecting a client leaves the other one connected
+                val client1 = phoenixClient(engine).getOrThrow()
+                val client2 = phoenixClient(engine).getOrThrow()
+                client1.connect(mapOf("token" to "user1234"))
+                client2.connect(mapOf("token" to "user1234"))
+                client1.state.waitConnected()
+                client2.state.waitConnected()
+
+                client1.disconnect()
+                client1.state.waitDisconnected()
+                val channel = client2.join("test:1").getOrThrow()
+                assertTrue(channel.push("get_headers").isSuccess)
+                channel.leave()
+
+                // Closing the engine closes the remaining connection
+                engine.close()
+                client2.state.waitDisconnected()
+                client2.disconnect()
+            }
+        }
+    }
+
+    @Test
+    @ExperimentalCoroutinesApi
+    fun testFailedConnectionCarriesTheStatus() = runTest {
+        withContext(Dispatchers.Default) {
+            withTimeout(5000) {
+                val engine = createEngine()
+
+                val failure = engine.connectWebSocket(DEFAULT_SOCKET_PATH, mapOf("token" to "wrongToken")) {
+                    fail("no event is expected for a connection which failed to open")
+                }.exceptionOrNull()
+
+                assertIs<WebSocketConnectException>(failure)
+                assertTrue(failure.isForbidden)
+
+                engine.close()
             }
         }
     }
@@ -147,16 +236,14 @@ class ClientTest : EngineTest() {
     }
 
     private fun getClient(
-        path: String = DEFAULT_WS_PATH,
+        path: String = DEFAULT_SOCKET_PATH,
         heartbeatInterval: Long = DEFAULT_HEARTBEAT_INTERVAL,
         heartbeatTimeout: Long = DEFAULT_HEARTBEAT_TIMEOUT,
         defaultTimeout: Long = DEFAULT_TIMEOUT,
     ): Client =
         phoenixClient(
-            webSocketEngine = createEngine(),
-            port = TEST_SERVER_PORT,
+            httpEngine = createEngine(),
             path = path,
-            ssl = false,
             heartbeatInterval = heartbeatInterval,
             heartbeatTimeout = heartbeatTimeout,
             defaultTimeout = defaultTimeout,

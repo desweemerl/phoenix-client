@@ -62,16 +62,12 @@ fun refGenerator(): () -> Long {
 }
 
 internal class ClientImpl(
-    val host: String = DEFAULT_WS_HOST,
-    val port: Int = DEFAULT_WS_PORT,
-    val path: String = DEFAULT_WS_PATH,
-    val ssl: Boolean = DEFAULT_WS_SSL,
-    val untrustedCertificate: Boolean = DEFAULT_UNTRUSTED_CERTIFICATE,
+    val path: String = DEFAULT_SOCKET_PATH,
     val retry: DynamicTimeout = DEFAULT_RETRY,
     val heartbeatInterval: Long = DEFAULT_HEARTBEAT_INTERVAL,
     val heartbeatTimeout: Long = DEFAULT_HEARTBEAT_TIMEOUT,
     private val defaultTimeout: Long = DEFAULT_TIMEOUT,
-    private val webSocketEngine: WebSocketEngine,
+    private val httpEngine: PhoenixHttpEngine,
     private val dispatcher: CoroutineDispatcher,
     private val scope: CoroutineScope,
 ) : Client {
@@ -132,6 +128,22 @@ internal class ClientImpl(
     }
 
     private var webSocketJob: Job? = null
+
+    // Connection of this client on the engine, which may hold others. Null unless connected.
+    private val connection = atomic<PhoenixWebSocketConnection?>(null)
+
+    private fun sendToWebSocket(message: OutgoingMessage): Result<Unit> =
+        connection.value?.send(message) ?: Result.failure(BadActionException("WebSocket is not connected"))
+
+    // Closes the connection of this client only: the engine reports DISCONNECTED once it is closed.
+    private fun closeWebSocket() {
+        connection.value?.close()
+    }
+
+    private fun setConnectionState(connectionState: ConnectionState) {
+        logger.d { "New connection state '$connectionState'" }
+        _state.update { ClientState(active = it.active, connectionState = connectionState) }
+    }
 
     init {
         if (heartbeatInterval < defaultTimeout) {
@@ -198,7 +210,7 @@ internal class ClientImpl(
                     val outgoingMessage = OutgoingMessage(topic, event, payload, ref, joinRef)
 
                     if (noReply) {
-                        webSocketEngine.send(outgoingMessage)
+                        sendToWebSocket(outgoingMessage)
                         result = Result.success(null)
                         return@withTimeout
                     }
@@ -206,7 +218,7 @@ internal class ClientImpl(
                     val reply = registerReply(ref)
 
                     try {
-                        webSocketEngine.send(outgoingMessage)
+                        sendToWebSocket(outgoingMessage)
 
                         val flows = arrayOf(
                             flow<Result<IncomingMessage>> { emit(Result.success(reply.await())) },
@@ -336,44 +348,65 @@ internal class ClientImpl(
         logger.i { "Launching webSocket" }
         _state.update { ClientState(active = it.active, connectionState = ConnectionState.CONNECTING) }
 
-        webSocketEngine.connect(
-            host = host,
-            port = port,
-            path = path,
-            params = params,
-            headers = headers,
-            ssl = ssl,
-            untrustedCertificate = untrustedCertificate,
-        ) { event ->
-            val incomingMessage = event.message
+        fun receive(incomingMessage: IncomingMessage) {
+            logger.d { "Receiving message from engine: $incomingMessage" }
 
-            if (incomingMessage != null) {
-                logger.d { "Receiving message from engine: $incomingMessage" }
-
-                if (!_messages.tryEmit(incomingMessage)) {
-                    logger.w { "Failed to emit message: $incomingMessage" }
-                }
-
-                dispatchReply(incomingMessage)
-
-                // TODO: Check forbidden on both WebSocket and channel
-                if (incomingMessage == Forbidden) {
-                    logger.i { "Received message 'forbidden'" }
-                    _state.update { ClientState(active = false, connectionState = it.connectionState) }
-                } else if (incomingMessage.isError()) {
-                    launch {
-                        rejoinChannel(incomingMessage.topic)
-                    }
-                }
+            if (!_messages.tryEmit(incomingMessage)) {
+                logger.w { "Failed to emit message: $incomingMessage" }
             }
 
-            val newState = event.state
+            dispatchReply(incomingMessage)
 
-            if (newState != null) {
-                logger.d { "Receiving new state '$newState' from WebSocket engine" }
-                _state.update { ClientState(active = it.active, connectionState = newState) }
+            // TODO: Check forbidden on both WebSocket and channel
+            if (incomingMessage == Forbidden) {
+                logger.i { "Received message 'forbidden'" }
+                _state.update { ClientState(active = false, connectionState = it.connectionState) }
+            } else if (incomingMessage.isError()) {
+                launch {
+                    rejoinChannel(incomingMessage.topic)
+                }
             }
         }
+
+        // The engine may report the end of the connection from its own threads before connectWebSocket()
+        // returns: the lock keeps CONNECTED from being set after DISCONNECTED.
+        val lock = SynchronizedObject()
+        var ended = false
+        var opened: PhoenixWebSocketConnection? = null
+
+        val result = httpEngine.connectWebSocket(path = path, params = params, headers = headers) { event ->
+            event.message?.let { receive(it) }
+
+            if (event.state == ConnectionState.DISCONNECTED) {
+                synchronized(lock) {
+                    ended = true
+                    opened?.let { connection.compareAndSet(it, null) }
+                    setConnectionState(ConnectionState.DISCONNECTED)
+                }
+            }
+        }
+
+        result.fold(
+            onSuccess = { newConnection ->
+                synchronized(lock) {
+                    if (!ended) {
+                        opened = newConnection
+                        connection.value = newConnection
+                        setConnectionState(ConnectionState.CONNECTED)
+                    }
+                }
+
+                // Disconnected by the application while connecting.
+                if (!state.value.active) {
+                    newConnection.close()
+                }
+            },
+            onFailure = { ex ->
+                // A refused handshake (403) stops the client; other failures are retried.
+                receive(if ((ex as? WebSocketConnectException)?.isForbidden == true) Forbidden else Failure)
+                setConnectionState(ConnectionState.DISCONNECTED)
+            },
+        )
 
         state.waitDisconnected()
     }
@@ -391,7 +424,7 @@ internal class ClientImpl(
                 )
                 if (result.isFailure) {
                     logger.d { "Reconnecting WebSocket because heartbeat gave error: ${result.exceptionOrNull()?.message}" }
-                    webSocketEngine.close()
+                    closeWebSocket()
                 }
             }
         }
@@ -483,17 +516,18 @@ internal class ClientImpl(
         }
         synchronized(channelsLock) { channels.clear() }
 
-        webSocketEngine.close()
+        closeWebSocket()
     }
 }
 
+/**
+ * Client connecting to the server of [httpEngine] (see [KtorHttpEngine]), on the socket [path]. The engine can be
+ * shared with other clients and with the HTTP requests of the application, which closes it: the client only closes
+ * its own connection.
+ */
 fun phoenixClient(
-    webSocketEngine: WebSocketEngine,
-    host: String = DEFAULT_WS_HOST,
-    port: Int = DEFAULT_WS_PORT,
-    path: String = DEFAULT_WS_PATH,
-    ssl: Boolean = DEFAULT_WS_SSL,
-    untrustedCertificate: Boolean = DEFAULT_UNTRUSTED_CERTIFICATE,
+    httpEngine: PhoenixHttpEngine,
+    path: String = DEFAULT_SOCKET_PATH,
     retryTimeout: DynamicTimeout = DEFAULT_RETRY,
     heartbeatInterval: Long = DEFAULT_HEARTBEAT_INTERVAL,
     heartbeatTimeout: Long = DEFAULT_HEARTBEAT_TIMEOUT,
@@ -504,16 +538,12 @@ fun phoenixClient(
     try {
         Result.success(
             ClientImpl(
-                host,
-                port,
                 path,
-                ssl,
-                untrustedCertificate,
                 retryTimeout,
                 heartbeatInterval,
                 heartbeatTimeout,
                 defaultTimeout,
-                webSocketEngine,
+                httpEngine,
                 dispatcher,
                 scope,
             )

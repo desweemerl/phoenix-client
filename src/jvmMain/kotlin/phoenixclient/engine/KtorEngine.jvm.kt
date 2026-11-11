@@ -43,8 +43,8 @@ private fun getUntrustedOkHttpClient(): OkHttpClient {
 }
 
 // OkHttp's exception carries the status of a refused handshake, no need to record it.
-internal actual fun createPlatformHttpClient(untrustedCertificate: Boolean): PlatformHttpClient =
-    PlatformHttpClient(
+internal actual fun createPlatformHttpClient(untrustedCertificate: Boolean): KtorClient =
+    KtorClient(
         HttpClient(OkHttp) {
             engine {
                 preconfigured = if (untrustedCertificate) getUntrustedOkHttpClient() else getHttpClient()

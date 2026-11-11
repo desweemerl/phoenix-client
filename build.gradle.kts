@@ -10,7 +10,7 @@ plugins {
 }
 
 group = "com.desweemerl"
-version = "0.2.0"
+version = "0.3.0"
 
 repositories {
     mavenCentral()
@@ -51,14 +51,15 @@ kotlin {
             // Companion library for Kotlin. Exposed as api: the public API returns Flow.
             api("org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutinesVersion")
 
-            // WebSocket engine. Exposed as api: KtorEngine accepts a custom HttpClient.
-            api("io.ktor:ktor-client-core:$ktorVersion")
+            // WebSocket and HTTP engine. Not exposed: the public API has no Ktor type (see PhoenixHttpEngine).
+            implementation("io.ktor:ktor-client-core:$ktorVersion")
             implementation("io.ktor:ktor-client-websockets:$ktorVersion")
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
             implementation("co.touchlab:kermit:2.2.0")
             implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:$coroutinesVersion")
+            implementation("io.ktor:ktor-client-mock:$ktorVersion")
         }
         jvmMain.dependencies {
             implementation("io.ktor:ktor-client-okhttp:$ktorVersion")
